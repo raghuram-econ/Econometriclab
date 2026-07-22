@@ -6,7 +6,7 @@ import { getAuth } from "firebase-admin/auth";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
-import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
+import { createProxyMiddleware } from "http-proxy-middleware";
 import {
   interpretModelPrompt,
   generateReportPrompt,
@@ -342,41 +342,55 @@ async function startServer() {
     }
   });
 
-  // Python backend proxy for high-value statistical routes
+  // Python backend forwarding for high-value statistical routes.
+  //
+  // JSON routes are forwarded with fetch rather than http-proxy-middleware:
+  // express.json() has already consumed the request stream by this point, and
+  // the proxy middleware silently hangs on such requests. The upload route
+  // (/api/parse-sav) is multipart, which express.json() does not touch, so the
+  // raw stream is intact and the proxy can pipe it through unchanged.
+  const PYTHON_JSON_ROUTES: Record<string, string> = {
+    "/api/python/gmm": "/python/gmm",
+    "/api/python/cointegration": "/python/cointegration",
+    "/api/python/cox": "/python/cox",
+    "/api/python/arima-full": "/python/arima-full",
+    "/api/python/marginal-effects": "/python/marginal-effects",
+    "/api/python/heckman": "/python/heckman",
+    "/api/python/johansen": "/python/johansen",
+    "/api/python/survey-ols": "/python/survey-ols",
+  };
+
+  app.post(Object.keys(PYTHON_JSON_ROUTES), async (req, res) => {
+    const target = PYTHON_JSON_ROUTES[req.path];
+    if (!target) return res.status(404).json({ error: "Unknown Python route" });
+    try {
+      const upstream = await fetch(`${pythonBackendUrl}${target}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Token": process.env.INTERNAL_SECRET || 'ell_internal_token_secure_9832',
+        },
+        body: JSON.stringify(req.body ?? {}),
+      });
+      const text = await upstream.text();
+      res.status(upstream.status);
+      try {
+        res.json(JSON.parse(text));
+      } catch {
+        res.send(text);
+      }
+    } catch (err: any) {
+      res.status(503).json({ error: "Python compute engine unavailable. Try the TypeScript engine." });
+    }
+  });
+
   const pythonProxy = createProxyMiddleware({
     target: pythonBackendUrl,
     changeOrigin: true,
-    pathFilter: (pathname: string, req: any) => {
-      const allowedPaths = [
-        "/api/python/gmm",
-        "/api/python/cointegration",
-        "/api/python/cox",
-        "/api/python/arima-full",
-        "/api/python/marginal-effects",
-        "/api/python/heckman",
-        "/api/python/johansen",
-        "/api/python/survey-ols",
-        "/api/parse-sav"
-      ];
-      return allowedPaths.includes(req.originalUrl || pathname);
-    },
-    pathRewrite: {
-      "^/api/python": "/python",
-      "^/api/parse-sav": "/api/parse-sav"
-    },
-    onProxyReq: (proxyReq: any, req: any, res: any) => {
-      proxyReq.setHeader('X-Internal-Token', process.env.INTERNAL_SECRET || 'ell_internal_token_secure_9832');
-      fixRequestBody(proxyReq, req);
-    },
-    onError: (err: any, req: any, res: any) => {
-      if (!res.headersSent) {
-        res.status(503).json({ error: "Python compute engine unavailable. Try the TypeScript engine." });
-      }
-    },
+    pathFilter: (pathname: string, req: any) => (req.originalUrl || pathname) === "/api/parse-sav",
     on: {
       proxyReq: (proxyReq: any, req: any, res: any) => {
         proxyReq.setHeader('X-Internal-Token', process.env.INTERNAL_SECRET || 'ell_internal_token_secure_9832');
-        fixRequestBody(proxyReq, req);
       },
       error: (err: any, req: any, res: any) => {
         if (!res.headersSent) {
