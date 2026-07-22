@@ -1,0 +1,175 @@
+{
+  "_provenance": "Computed live from statsmodels/linearmodels (BLAS/LAPACK), 2026-07-14. Same numerical foundation as R. DO NOT EDIT VALUES.",
+  "fixtures": {
+    "longley_ols_robust": {
+      "model": "OLS",
+      "dataset": "longley (statsmodels)",
+      "depvar": "TOTEMP",
+      "classic": {
+        "const": {
+          "coef": -3482258.6345979422,
+          "se": 890420.3836079354
+        },
+        "GNPDEFL": {
+          "coef": 15.061872271549873,
+          "se": 84.91492577481773
+        },
+        "GNP": {
+          "coef": -0.0358191792926712,
+          "se": 0.033491007772265075
+        },
+        "UNEMP": {
+          "coef": -2.020229803817525,
+          "se": 0.4883996816519555
+        },
+        "ARMED": {
+          "coef": -1.0332268671737141,
+          "se": 0.21427416316179218
+        },
+        "POP": {
+          "coef": -0.05110410565364987,
+          "se": 0.22607320006948278
+        },
+        "YEAR": {
+          "coef": 1829.151464614646,
+          "se": 455.4784991425031
+        }
+      },
+      "r2": 0.9954790045772896,
+      "HC1": {
+        "const": 1109615.4407910926,
+        "GNPDEFL": 68.2937965929937,
+        "GNP": 0.032767996776998376,
+        "UNEMP": 0.5109854812381623,
+        "ARMED": 0.19499333485578976,
+        "POP": 0.21094466162476438,
+        "YEAR": 571.1791673891041
+      },
+      "HC2": {
+        "const": 1202369.5095505202,
+        "GNPDEFL": 67.49208209195243,
+        "GNP": 0.03653405015959671,
+        "UNEMP": 0.5533367132766907,
+        "ARMED": 0.20522087329189426,
+        "POP": 0.22323671757714716,
+        "YEAR": 617.592953530974
+      },
+      "HC3": {
+        "const": 1799477.2207747696,
+        "GNPDEFL": 91.11938642832996,
+        "GNP": 0.05562398807056438,
+        "UNEMP": 0.8221334975162446,
+        "ARMED": 0.29878925615625795,
+        "POP": 0.32490581986339107,
+        "YEAR": 922.8078366849857
+      }
+    },
+    "grunfeld_fe": {
+      "model": "Panel FE (within)",
+      "dataset": "grunfeld (statsmodels)",
+      "coefficients": {
+        "const": {
+          "coef": -55.27154857651659,
+          "se": 10.891024643942508
+        },
+        "value": {
+          "coef": 0.11012911902575996,
+          "se": 0.011299843289595263
+        },
+        "capital": {
+          "coef": 0.3100334418750041,
+          "se": 0.016540476519482046
+        }
+      },
+      "r2_within": 0.7666706515488428,
+      "nobs": 220
+    },
+    "grunfeld_fe_clustered": {
+      "note": "SEs clustered by firm (Stata: xtreg, fe vce(cluster firm))",
+      "se": {
+        "const": 24.189716261772578,
+        "value": 0.014438018422962714,
+        "capital": 0.05014456928648449
+      }
+    },
+    "grunfeld_re": {
+      "model": "Panel RE (Swamy-Arora)",
+      "coefficients": {
+        "const": {
+          "coef": -53.9436013780205,
+          "se": 25.6969760080713
+        },
+        "value": {
+          "coef": 0.10930531485004888,
+          "se": 0.009913813457701936
+        },
+        "capital": {
+          "coef": 0.30803602602378244,
+          "se": 0.016387303087009395
+        }
+      }
+    },
+    "mroz_logit": {
+      "model": "Logit",
+      "dataset": "mroz (linearmodels)",
+      "depvar": "lfp = hours>0",
+      "coefficients": {
+        "const": {
+          "coef": 1.311945226719226,
+          "se": 0.73482260239408
+        },
+        "educ": {
+          "coef": 0.18824256256355074,
+          "se": 0.039969737311738106
+        },
+        "exper": {
+          "coef": 0.12403228449623586,
+          "se": 0.01319309887425755
+        },
+        "age": {
+          "coef": -0.09983706242549946,
+          "se": 0.013279245466089027
+        },
+        "kidslt6": {
+          "coef": -1.4460302197090684,
+          "se": 0.19836046423609005
+        }
+      },
+      "llf": -409.4708531631343,
+      "pseudo_r2": 0.2047151618776497,
+      "nobs": 753
+    },
+    "grunfeld_ols_clustered": {
+      "model": "OLS cluster-robust (firm)",
+      "coefficients": {
+        "const": {
+          "coef": -38.41005398639215,
+          "se": 18.136279992710463
+        },
+        "value": {
+          "coef": 0.11453436301062621,
+          "se": 0.016200445437142347
+        },
+        "capital": {
+          "coef": 0.22751412554987116,
+          "se": 0.08547781688466204
+        }
+      },
+      "n_clusters": 11
+    },
+    "engel_quantile_median": {
+      "model": "Quantile q=0.5",
+      "dataset": "engel (statsmodels)",
+      "coefficients": {
+        "const": {
+          "coef": 81.48225552709113,
+          "se": 14.634474363880209
+        },
+        "income": {
+          "coef": 0.5601805420224162,
+          "se": 0.013175622939475764
+        }
+      }
+    }
+  }
+}

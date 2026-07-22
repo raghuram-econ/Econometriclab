@@ -1,0 +1,20 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+firebase-applet-config.json
+firebase-blueprint.json
+tmp_script_ols.cjs
+
+# Python virtual environments and bootstrap artifacts
+.venv/
+venv/
+env/
+get-pip.py
+__pycache__/
+**/__pycache__/
+*.pyc

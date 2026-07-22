@@ -1,0 +1,157 @@
+{
+  "_provenance": "All numbers computed live by statsmodels 2026-07-14; layouts mimic each tool's output format. DO NOT EDIT.",
+  "fixtures": [
+    {
+      "id": "python_ols",
+      "toolType": "Python",
+      "analysisType": "OLS",
+      "rawOutput": "                            OLS Regression Results                            \n==============================================================================\nDep. Variable:                 TOTEMP   R-squared:                       0.985\nModel:                            OLS   Adj. R-squared:                  0.981\nMethod:                 Least Squares   F-statistic:                     264.4\nDate:                Fri, 17 Jul 2026   Prob (F-statistic):           3.19e-11\nTime:                        08:45:28   Log-Likelihood:                -119.16\nNo. Observations:                  16   AIC:                             246.3\nDf Residuals:                      12   BIC:                             249.4\nDf Model:                           3                                         \nCovariance Type:            nonrobust                                         \n==============================================================================\n                 coef    std err          t      P>|t|      [0.025      0.975]\n------------------------------------------------------------------------------\nconst       5.331e+04    716.342     74.415      0.000    5.17e+04    5.49e+04\nGNP            0.0408      0.002     18.485      0.000       0.036       0.046\nUNEMP         -0.7968      0.213     -3.734      0.003      -1.262      -0.332\nARMED         -0.4828      0.255     -1.892      0.083      -1.039       0.073\n==============================================================================\nOmnibus:                        4.210   Durbin-Watson:                   0.904\nProb(Omnibus):                  0.122   Jarque-Bera (JB):                1.788\nSkew:                           0.532   Prob(JB):                        0.409\nKurtosis:                       4.245   Cond. No.                     2.39e+06\n==============================================================================\n\nNotes:\n[1] Standard Errors assume that the covariance matrix of the errors is correctly specified.\n[2] The condition number is large, 2.39e+06. This might indicate that there are\nstrong multicollinearity or other numerical problems.",
+      "truth": {
+        "coefficients": {
+          "const": {
+            "coef": 53306.461188,
+            "se": 716.341858,
+            "t": 74.4148,
+            "p": 0.0
+          },
+          "GNP": {
+            "coef": 0.040788,
+            "se": 0.002207,
+            "t": 18.4847,
+            "p": 0.0
+          },
+          "UNEMP": {
+            "coef": -0.796817,
+            "se": 0.213403,
+            "t": -3.7339,
+            "p": 0.002854
+          },
+          "ARMED": {
+            "coef": -0.482766,
+            "se": 0.25516,
+            "t": -1.892,
+            "p": 0.082861
+          }
+        },
+        "r2": 0.9851,
+        "n": 16
+      }
+    },
+    {
+      "id": "r_ols",
+      "toolType": "R",
+      "analysisType": "OLS",
+      "rawOutput": "Call:\nlm(formula = foodexp ~ income, data = engel)\n\nCoefficients:\n             Estimate Std. Error t value Pr(>|t|)    \n(Intercept)  147.4754    15.9571   9.242  1.57e-17 ***\nincome         0.4852     0.0144  33.772  9.92e-92 ***\n---\nSignif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1\n\nResidual standard error: 114.11 on 233 degrees of freedom\nMultiple R-squared:  0.8304,\tAdjusted R-squared:  0.8296\nF-statistic: 1140.5 on 1 and 233 DF,  p-value: < 2.2e-16",
+      "truth": {
+        "coefficients": {
+          "const": {
+            "coef": 147.4754,
+            "se": 15.9571,
+            "t": 9.242
+          },
+          "income": {
+            "coef": 0.4852,
+            "se": 0.0144,
+            "t": 33.772
+          }
+        },
+        "r2": 0.8304,
+        "df": 233
+      }
+    },
+    {
+      "id": "spss_logit",
+      "toolType": "SPSS",
+      "analysisType": "Logit",
+      "rawOutput": "Variables in the Equation\n            B      S.E.    Wald     df  Sig.   Exp(B)\neduc          0.188   0.040   22.181   1   0.000    1.207\nexper         0.124   0.013   88.384   1   0.000    1.132\nage          -0.100   0.013   56.525   1   0.000    0.905\nkidslt6      -1.446   0.198   53.143   1   0.000    0.236\nConstant      1.312   0.735    3.188   1   0.074    3.713\n\nModel Summary\n-2 Log likelihood: 818.942\nCox & Snell R Square: 0.244\nNagelkerke R Square: 0.328",
+      "truth": {
+        "coefficients": {
+          "const": {
+            "B": 1.312,
+            "SE": 0.735,
+            "Wald": 3.188,
+            "ExpB": 3.713
+          },
+          "educ": {
+            "B": 0.188,
+            "SE": 0.04,
+            "Wald": 22.181,
+            "ExpB": 1.207
+          },
+          "exper": {
+            "B": 0.124,
+            "SE": 0.013,
+            "Wald": 88.384,
+            "ExpB": 1.132
+          },
+          "age": {
+            "B": -0.1,
+            "SE": 0.013,
+            "Wald": 56.525,
+            "ExpB": 0.905
+          },
+          "kidslt6": {
+            "B": -1.446,
+            "SE": 0.198,
+            "Wald": 53.143,
+            "ExpB": 0.236
+          }
+        },
+        "minus2LL": 818.942,
+        "n": 753
+      }
+    },
+    {
+      "id": "stata_regress",
+      "toolType": "Stata",
+      "analysisType": "OLS",
+      "rawOutput": "      Source |       SS           df       MS      Number of obs   =       220\n             |                                      F(2, 217)      =    487.28\n             |                                      Prob > F        =    0.0000\n             |                                      R-squared       =    0.8179\n------------------------------------------------------------------------------\n      invest | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]\n-------------+----------------------------------------------------------------\n       value |   0.114534   0.005519    20.75  0.000     0.103657    0.125412\n     capital |   0.227514   0.024228     9.39  0.000     0.179761    0.275267\n       _cons | -38.410054   8.413371    -4.57  0.000   -54.992440  -21.827668",
+      "truth": {
+        "coefficients": {
+          "const": {
+            "coef": -38.410054,
+            "se": 8.413371
+          },
+          "value": {
+            "coef": 0.114534,
+            "se": 0.005519
+          },
+          "capital": {
+            "coef": 0.227514,
+            "se": 0.024228
+          }
+        },
+        "r2": 0.8179,
+        "n": 220
+      }
+    },
+    {
+      "id": "spss_anova",
+      "toolType": "SPSS",
+      "analysisType": "ANOVA",
+      "rawOutput": "ANOVA\ntest_score\n                 Sum of Squares    df    Mean Square      F      Sig.\nBetween Groups        786.565     2        393.283   10.053   0.000\nWithin Groups        4577.098   117         39.120\nTotal                5363.663   119",
+      "truth": {
+        "F": 10.053,
+        "p": 0.0,
+        "df_between": 2,
+        "df_within": 117,
+        "ss_between": 786.565,
+        "ss_within": 4577.098,
+        "ms_between": 393.283
+      }
+    },
+    {
+      "id": "r_ttest",
+      "toolType": "R",
+      "analysisType": "t-test",
+      "rawOutput": "\tWelch Two Sample t-test\n\ndata:  score_control and score_treatment\nt = -3.4331, df = 112.96, p-value = 0.0008\nalternative hypothesis: true difference in means is not equal to 0\n95 percent confidence interval:\n -11.08740 -2.97652\nsample estimates:\nmean of x mean of y \n 64.08212  71.11408",
+      "truth": {
+        "t": -3.4331,
+        "df": 112.96,
+        "p": 0.0008,
+        "mean_x": 64.08212,
+        "mean_y": 71.11408
+      }
+    }
+  ]
+}

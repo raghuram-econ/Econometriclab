@@ -1,0 +1,6 @@
+{
+  "name": "Economics Learning Lab (Beta)",
+  "description": "An integrated economics and econometrics platform. Study theory, run past questions synthesis, receive teacher feedback, and execute regressions across all 10 core fields of economic theory.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

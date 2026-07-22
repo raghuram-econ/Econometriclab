@@ -1,0 +1,219 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", ui-serif, Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-academic: "Cormorant Garamond", "Playfair Display", Georgia, serif;
+
+  --color-brand-primary: #0f172a; /* Deep Navy */
+  --color-brand-accent: #3b82f6; /* Modern Blue */
+  --color-brand-emerald: #10b981;
+  --color-bg-app: #fdfdfd; /* Professional Paper White */
+  --color-bg-dark: #020617;
+  --color-border-subtle: #f1f5f9;
+  --color-border-hard: #e2e8f0;
+
+  --shadow-premium: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  --shadow-elevated: 0 10px 15px -3px rgb(0 0 0 / 0.07), 0 4px 6px -4px rgb(0 0 0 / 0.07);
+  --shadow-inset-light: inset 0 2px 4px 0 rgb(0 0 0 / 0.05);
+
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+}
+
+@layer base {
+  body {
+    @apply bg-bg-app text-slate-800 antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4 {
+    @apply tracking-tight font-serif;
+  }
+}
+
+@layer components {
+  .card-premium {
+    @apply bg-white border border-border-hard rounded-lg shadow-premium hover:shadow-elevated transition-all duration-300;
+  }
+  
+  .glass-panel {
+    @apply bg-white/70 backdrop-blur-md border border-white/20 shadow-premium;
+  }
+
+  .interactive-grid {
+    @apply border border-slate-100 hover:border-slate-300 transition-colors duration-200 cursor-pointer;
+  }
+
+  .btn-primary {
+    @apply bg-brand-primary text-white px-5 py-2.5 rounded-md font-semibold text-sm hover:translate-y-[-1px] active:translate-y-[0px] shadow-sm transition-all duration-200 disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply bg-white border border-border-hard text-slate-700 px-5 py-2.5 rounded-md font-semibold text-sm hover:bg-slate-50 transition-all duration-200;
+  }
+
+  /* Custom scrollbar for a cleaner look */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+  }
+}
+
+@media print {
+  aside, header, nav, button, .no-print, [role="button"], .ManuscriptSettings, .alert-banner, .student-guide, footer, .tabs-list, .no-print-el, .absolute, .absolute-bg {
+    display: none !important;
+  }
+  
+  body, #root, main, #academic-lab, #teacher-mode, #report-builder, #manuscript-builder {
+    background: white !important;
+    color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+  }
+
+  main {
+    padding: 1.5cm !important;
+  }
+
+  .lg\:col-span-1 {
+    display: none !important;
+  }
+
+  .lg\:col-span-3, .lg\:col-span-4 {
+    width: 100% !important;
+    max-width: 100% !important;
+    float: none !important;
+  }
+
+  .card-premium, .border, .shadow-2xl, .shadow-xl, .shadow-sm, .rounded-2xl, .bg-slate-900, .bg-slate-950, .bg-stone-900 {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    color: black !important;
+    padding: 0 !important;
+    margin-bottom: 1.5cm !important;
+  }
+
+  pre, code {
+    background: #f4f4f5 !important;
+    color: #18181b !important;
+    border: 1px solid #e4e4e7 !important;
+    padding: 10px !important;
+    white-space: pre-wrap !important;
+    word-break: break-all !important;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: black !important;
+    font-family: "Playfair Display", Georgia, serif !important;
+    page-break-after: avoid;
+    margin-top: 1.5rem !important;
+    margin-bottom: 0.5rem !important;
+  }
+
+  p, span, textarea, td, th {
+    color: black !important;
+  }
+
+  textarea {
+    border: none !important;
+    resize: none !important;
+    overflow: visible !important;
+    height: auto !important;
+    width: 100% !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  body.printing-academic-report .no-print-during-report {
+    display: none !important;
+  }
+  
+  body.printing-academic-report .print-only-report-container {
+    display: block !important;
+    background: white !important;
+    color: black !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+}
+
+@media screen {
+  .print-only-report-container {
+    display: none !important;
+  }
+}
+
+/* Formal Academic Working Paper Cover Page and Serif Styles */
+.font-academic {
+  font-family: "Cormorant Garamond", "Playfair Display", Georgia, serif !important;
+}
+
+.working-paper-cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 297mm;
+  padding: 2.5cm 1.5cm;
+  background: #ffffff !important;
+  color: #000000 !important;
+  page-break-after: always;
+  break-after: page;
+}
+
+.academic-double-rule {
+  border-top: 2.5px solid #000000;
+  border-bottom: 1px solid #000000;
+  height: 5px;
+  margin-top: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.booktabs-table {
+  border-top: 2px solid #000000 !important;
+  border-bottom: 2px solid #000000 !important;
+}
+
+.booktabs-th {
+  border-bottom: 1.5px solid #000000 !important;
+  font-family: "Cormorant Garamond", "Playfair Display", Georgia, serif !important;
+}
+
+.booktabs-tr-divider {
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+.cover-title {
+  font-family: "Cormorant Garamond", "Playfair Display", Georgia, serif !important;
+  font-size: 2.5rem !important;
+  line-height: 3rem !important;
+  font-weight: 700 !important;
+  color: #000000 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.cover-subtitle {
+  font-family: "Cormorant Garamond", "Playfair Display", Georgia, serif !important;
+  font-size: 1.15rem !important;
+  line-height: 1.6rem !important;
+  font-weight: 400 !important;
+  color: #292524 !important;
+}
+
