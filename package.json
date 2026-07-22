@@ -18,6 +18,8 @@
     "certify:constants": "node scripts/certify-constants.js"
   },
   "dependencies": {
+    "tsx": "^4.21.0",
+    "esbuild": "^0.28.0",
     "@duckdb/duckdb-wasm": "1.28.0",
     "@google/genai": "^1.51.0",
     "@tailwindcss/vite": "^4.1.14",

@@ -7,14 +7,15 @@
 # (Dashboard → econometrics-lab → Environment) if you want the AI
 # features; the statistical engine works without it.
 
+
 services:
   # Node server: serves the React frontend and the TypeScript engine
   - type: web
     name: econometrics-lab
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    buildCommand: npm install && node ./node_modules/vite/bin/vite.js build
+    startCommand: node ./node_modules/tsx/dist/cli.mjs server.ts
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
@@ -24,10 +25,10 @@ services:
           type: web
           name: econometrics-lab-python
           envVarKey: RENDER_EXTERNAL_URL
-      - key: INTERNAL_SECRET
-        fromGroup: econometrics-shared
+      - fromGroup: econometrics-shared
       - key: GEMINI_API_KEY
         sync: false
+
 
   # Python backend: Heckman, Cox, Johansen, GMM, full ARIMA
   - type: web
@@ -39,8 +40,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      - key: INTERNAL_SECRET
-        fromGroup: econometrics-shared
+      - fromGroup: econometrics-shared
 
 envVarGroups:
   - name: econometrics-shared
