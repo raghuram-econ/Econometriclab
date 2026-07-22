@@ -566,21 +566,25 @@ function StatsInterpreterLabComponent() {
         assumptions: [
           {
             testName: "Breusch-Pagan Test (Heteroskedasticity)",
-            statistic: modelOutput.breuschPaganStat != null ? `BP = ${modelOutput.breuschPaganStat.toFixed(2)}` : "BP = N/A",
+            statistic: modelOutput.breuschPaganStat != null ? `BP = ${modelOutput.breuschPaganStat.toFixed(2)}` : "Not computed for this model",
             pValue: modelOutput.breuschPaganPValue != null ? modelOutput.breuschPaganPValue.toFixed(4) : "N/A",
-            verdict: modelOutput.breuschPaganPValue != null ? (modelOutput.breuschPaganPValue < 0.05 ? "Warn" : "Pass") : "Pass"
+            verdict: modelOutput.breuschPaganPValue != null ? (modelOutput.breuschPaganPValue < 0.05 ? "Warn" : "Pass") : "N/A"
           },
           {
             testName: "Variance Inflation Factor (Multicollinearity)",
-            statistic: "Max VIF = 1.05",
+            statistic: modelOutput.vifs && Object.keys(modelOutput.vifs).length > 0
+              ? `Max VIF = ${Math.max(...Object.values(modelOutput.vifs)).toFixed(2)}`
+              : (indepVars.length < 2 ? "N/A — needs 2+ regressors" : "Not computed for this model"),
             pValue: "N/A",
-            verdict: "Pass"
+            verdict: modelOutput.vifs && Object.keys(modelOutput.vifs).length > 0
+              ? (Math.max(...Object.values(modelOutput.vifs)) > 10 ? "Warn" : "Pass")
+              : "N/A"
           },
           {
             testName: "Durbin-Watson Test (Serial Correlation)",
-            statistic: modelOutput.durbinWatson != null ? `d = ${modelOutput.durbinWatson.toFixed(2)}` : "d = 1.96",
+            statistic: modelOutput.durbinWatson != null ? `d = ${modelOutput.durbinWatson.toFixed(2)}` : "Not computed for this model",
             pValue: "N/A",
-            verdict: modelOutput.durbinWatson !== undefined ? (modelOutput.durbinWatson < 1.4 || modelOutput.durbinWatson > 2.6 ? "Warn" : "Pass") : "Pass"
+            verdict: modelOutput.durbinWatson !== undefined ? (modelOutput.durbinWatson < 1.4 || modelOutput.durbinWatson > 2.6 ? "Warn" : "Pass") : "N/A"
           }
         ],
         apaParagraph: `An empirical estimation was conducted using ${analysisType} regression. The dependent variable was ${depVar}, and regressors included: ${indepVars.join(', ')}. The model converged successfully with N = ${modelOutput.n} observations. Goodness-of-fit indicators suggest the model explains ${((modelOutput.rSquared || 0) * 100).toFixed(2)}% of the total variations. The most significant predictors were evaluated. Standard diagnostic audits indicated model validity. Click 'Interpret Output' to fetch comprehensive senior-level AI qualitative review.`
@@ -601,7 +605,7 @@ function StatsInterpreterLabComponent() {
           coefficients: modelOutput.coefficients,
           diagnostics: parsedRes.diagnostics,
           assumptions: parsedRes.assumptions,
-          vifs: modelOutput.vifs || (indepVars[0] ? { [indepVars[0]]: 1.05 } : {})
+          vifs: modelOutput.vifs || {}
         },
         interpretation: parsedRes.apaParagraph
       };
@@ -1243,6 +1247,33 @@ function StatsInterpreterLabComponent() {
                 <div className="text-right font-mono text-[10px] text-slate-500">
                   N = {result?.diagnostics?.df ? (parseInt(result.diagnostics.df) + (result?.coefficients?.length ?? 0)).toString() : 'N/A'} • {toolType} ENGINE
                 </div>
+              </div>
+
+              {/* PROVENANCE BADGE — always visible, states plainly where these numbers came from */}
+              <div className={cn(
+                "flex items-center gap-2 px-3 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-wider font-mono",
+                isSimulated
+                  ? "bg-amber-50 border-amber-200 text-amber-700"
+                  : workbenchMode === 'live'
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                    : "bg-blue-50 border-blue-200 text-blue-700"
+              )}>
+                {isSimulated ? (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Illustrative example — not computed from your data
+                  </>
+                ) : workbenchMode === 'live' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    Computed live by the verified statistical engine
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    AI-parsed from pasted output — not independently verified
+                  </>
+                )}
               </div>
 
               {/* SECTION I: COEFFICIENTS TABLE or specialized table */}

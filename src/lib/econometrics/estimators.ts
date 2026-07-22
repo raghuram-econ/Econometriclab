@@ -451,6 +451,31 @@ export function estimateModel(
     }
     const durbinWatson = dwDen > 0 ? dwNum / dwDen : 2.0;
 
+    // VIF: for each regressor, regress it on the intercept plus every other
+    // regressor and convert the resulting R^2 into a variance inflation factor.
+    // Undefined with fewer than two regressors, since there is nothing to
+    // collide with.
+    let vifs: Record<string, number> | undefined;
+    if (xVars.length >= 2) {
+      vifs = {};
+      const xOffset = includeIntercept ? 1 : 0;
+      xVars.forEach((varName, j) => {
+        try {
+          const auxY = X.map(row => row[xOffset + j] ?? 0);
+          const auxX = X.map(row => row.filter((_, idx) => idx !== xOffset + j));
+          const auxLabels = labels.filter((_, idx) => idx !== xOffset + j);
+          const qrAux = solveQR(auxX, auxY, auxLabels);
+          const auxYHat = math.multiply(auxX as any, qrAux.beta as any) as any as number[];
+          const auxRes = auxY.map((val, i) => val - (auxYHat[i] ?? 0));
+          const auxRss = auxRes.reduce((s, r) => s + r * r, 0);
+          const auxMean = auxY.reduce((s, v) => s + v, 0) / auxY.length;
+          const auxTss = auxY.reduce((s, v) => s + (v - auxMean) ** 2, 0);
+          const auxR2 = auxTss > 0 ? 1 - auxRss / auxTss : 0;
+          (vifs as Record<string, number>)[varName] = 1 / (1 - Math.min(0.999, Math.max(0, auxR2)));
+        } catch (e) { /* leave this variable's VIF unset if the auxiliary regression fails */ }
+      });
+    }
+
     return {
       coefficients,
       rSquared,
@@ -468,7 +493,8 @@ export function estimateModel(
       residuals,
       durbinWatson,
       breuschPaganStat: bpStat,
-      breuschPaganPValue: bpP
+      breuschPaganPValue: bpP,
+      vifs
     };
   }
 
