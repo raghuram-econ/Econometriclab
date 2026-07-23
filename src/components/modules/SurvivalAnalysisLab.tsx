@@ -110,6 +110,7 @@ export default function SurvivalAnalysisLab({ dataset: propDataset, onRunComplet
   const [results, setResults] = useState<any | null>(null);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'selection' | 'curves' | 'table'>('selection');
+  const [survivalError, setSurvivalError] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (numericVariables.length > 1) {
@@ -124,6 +125,20 @@ export default function SurvivalAnalysisLab({ dataset: propDataset, onRunComplet
 
   const handleRunSurvival = () => {
     if (!activeDataset || !timeVar || !eventVar) return;
+
+    // The Kaplan-Meier step function only counts a row as an event when its
+    // indicator is exactly 1 (see calculateKM below) - any other non-zero
+    // value (2, 3, ...) is silently folded into "censored" rather than
+    // flagged, which would quietly misrepresent the survival curve.
+    const eventValues = Array.from(new Set(
+      (activeDataset.data || []).map(row => parseInt(row[eventVar])).filter(v => !isNaN(v))
+    ));
+    const isBinary = eventValues.every(v => v === 0 || v === 1);
+    if (!isBinary) {
+      setSurvivalError(`Event Indicator "${eventVar}" must be binary (0 or 1). It has values: ${eventValues.slice(0, 6).join(', ')}${eventValues.length > 6 ? '...' : ''}. Kaplan-Meier only recognizes exactly 1 as "event occurred" - any other value would be silently treated as censored.`);
+      return;
+    }
+    setSurvivalError(null);
     setIsRunning(true);
 
     setTimeout(() => {
@@ -308,6 +323,11 @@ export default function SurvivalAnalysisLab({ dataset: propDataset, onRunComplet
                       </>
                     )}
                   </button>
+                  {survivalError && (
+                    <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-3 leading-relaxed">
+                      {survivalError}
+                    </p>
+                  )}
                 </div>
               </div>
 
