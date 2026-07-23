@@ -54,6 +54,58 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
   const variables = useMemo(() => dataset?.variables || [], [dataset]);
   const numericVars = useMemo(() => variables.filter(v => v.type === 'numeric'), [variables]);
 
+  // Non-numeric columns (e.g. "yes"/"no" survey responses) that take exactly two
+  // distinct values are valid Logit/Probit outcomes once mapped to 0/1 - they are
+  // excluded from numericVars, so without this they'd be impossible to select even
+  // though they are the most common real-world binary outcome.
+  const binaryCodebook = useMemo(() => {
+    const map = new Map<string, { zero: string; one: string }>();
+    if (!dataset) return map;
+    variables.forEach(v => {
+      if (v.type === 'numeric' || v.type === 'date') return;
+      const distinct = Array.from(new Set(
+        (dataset.data || [])
+          .map(r => r[v.name])
+          .filter(val => val !== null && val !== undefined && val !== '')
+          .map(val => String(val).trim())
+      ));
+      if (distinct.length !== 2) return;
+      const lower = distinct.map(d => d.toLowerCase());
+      let zero = distinct[0]!, one = distinct[1]!;
+      if (lower.includes('no') && lower.includes('yes')) {
+        zero = distinct[lower.indexOf('no')]!;
+        one = distinct[lower.indexOf('yes')]!;
+      } else if (lower.includes('false') && lower.includes('true')) {
+        zero = distinct[lower.indexOf('false')]!;
+        one = distinct[lower.indexOf('true')]!;
+      } else {
+        const sorted = [...distinct].sort();
+        zero = sorted[0]!;
+        one = sorted[1]!;
+      }
+      map.set(v.name, { zero, one });
+    });
+    return map;
+  }, [dataset, variables]);
+
+  const binaryOutcomeOptions = useMemo(() => [
+    ...numericVars.map(v => ({ name: v.name, label: v.name })),
+    ...Array.from(binaryCodebook.entries()).map(([name, { zero, one }]) => ({
+      name, label: `${name} (${zero}=0, ${one}=1)`
+    }))
+  ], [numericVars, binaryCodebook]);
+
+  // Encodes a raw cell value for a chosen binary outcome: numeric columns pass
+  // through unchanged, categorical columns are mapped via binaryCodebook.
+  const encodeBinaryY = (rawValue: any, outcomeVar: string): number => {
+    const codebook = binaryCodebook.get(outcomeVar);
+    if (!codebook) return Number(rawValue);
+    const s = String(rawValue).trim();
+    if (s === codebook.one) return 1;
+    if (s === codebook.zero) return 0;
+    return NaN;
+  };
+
   if (!dataset) {
     return (
       <div className="p-12 text-center bg-stone-50 border border-dashed border-stone-200 rounded-2xl max-w-2xl mx-auto my-12">
@@ -75,8 +127,8 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
     setTimeout(() => {
       try {
         const data = dataset.data || [];
-        const yRaw = data.map(r => Number(r[lpOutcome]));
-        
+        const yRaw = data.map(r => encodeBinaryY(r[lpOutcome], lpOutcome));
+
         // Check Y is binary
         const uniqueY = Array.from(new Set(yRaw));
         const isBinary = uniqueY.every(val => val === 0 || val === 1);
@@ -89,14 +141,16 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
 
         // Filter valid rows
         const validRows = data.filter(row => {
-          return [lpOutcome, ...lpPredictors].every(v => row[v] !== undefined && row[v] !== null && !isNaN(Number(row[v])));
+          const yOk = !isNaN(encodeBinaryY(row[lpOutcome], lpOutcome));
+          const xOk = lpPredictors.every(v => row[v] !== undefined && row[v] !== null && !isNaN(Number(row[v])));
+          return yOk && xOk;
         });
 
         if (validRows.length < k + 5) {
           throw new Error('Insufficient observations for estimation.');
         }
 
-        const Y = validRows.map(r => Number(r[lpOutcome]));
+        const Y = validRows.map(r => encodeBinaryY(r[lpOutcome], lpOutcome));
         const X = validRows.map(row => {
           const rowVals = lpPredictors.map(v => Number(row[v]));
           return [1, ...rowVals]; // Add intercept
@@ -505,7 +559,7 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                   className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
                 >
                   <option value="">Select binary variable (0/1)...</option>
-                  {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                  {binaryOutcomeOptions.map(v => <option key={v.name} value={v.name}>{v.label}</option>)}
                 </select>
               </div>
 
