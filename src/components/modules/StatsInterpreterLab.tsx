@@ -390,7 +390,12 @@ function StatsInterpreterLabComponent() {
   useEffect(() => {
     if (currentDataset && currentDataset.variables && (currentDataset.variables?.length ?? 0) > 0) {
       setWorkbenchMode('live');
-      setIsSimulated(false);
+      // A dataset being present doesn't mean anything has been computed for
+      // it yet - clear any stale (possibly illustrative) result rather than
+      // leaving it on screen mislabeled as live. isSimulated only becomes
+      // false once handleRunLocalEngine/handleInterpret actually run.
+      setResult(null);
+      setIsSimulated(true);
       // Auto-assign default selections
       const firstVar = currentDataset.variables[0];
       if (firstVar) setDepVar(firstVar.name);
