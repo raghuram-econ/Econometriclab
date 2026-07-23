@@ -417,7 +417,11 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Outcome variable (Y)</label>
                 <select
                   value={didOutcome}
-                  onChange={(e) => setDidOutcome(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDidOutcome(v);
+                    setDidControls(prev => prev.filter(c => c !== v));
+                  }}
                   className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
                 >
                   <option value="">Select variable...</option>
@@ -429,7 +433,11 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Treatment Indicator (D)</label>
                 <select
                   value={didTreatment}
-                  onChange={(e) => setDidTreatment(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDidTreatment(v);
+                    setDidControls(prev => prev.filter(c => c !== v));
+                  }}
                   className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
                 >
                   <option value="">Select treatment column (0/1)...</option>
@@ -441,7 +449,11 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Time Indicator (Post/Pre)</label>
                 <select
                   value={didTime}
-                  onChange={(e) => setDidTime(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDidTime(v);
+                    setDidControls(prev => prev.filter(c => c !== v));
+                  }}
                   className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
                 >
                   <option value="">Select post/pre column (0/1)...</option>
@@ -600,7 +612,11 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Outcome variable (Y)</label>
                 <select
                   value={ivOutcome}
-                  onChange={(e) => setIvOutcome(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setIvOutcome(v);
+                    setIvControls(prev => prev.filter(c => c !== v));
+                  }}
                   className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
                 >
                   <option value="">Select variable...</option>
@@ -612,7 +628,11 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Endogenous Regressor (X)</label>
                 <select
                   value={ivEndogenous}
-                  onChange={(e) => setIvEndogenous(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setIvEndogenous(v);
+                    setIvControls(prev => prev.filter(c => c !== v));
+                  }}
                   className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
                 >
                   <option value="">Select variable...</option>
@@ -624,7 +644,11 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Instrumental Variable (Z)</label>
                 <select
                   value={ivInstrument}
-                  onChange={(e) => setIvInstrument(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setIvInstrument(v);
+                    setIvControls(prev => prev.filter(c => c !== v));
+                  }}
                   className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
                 >
                   <option value="">Select variable...</option>

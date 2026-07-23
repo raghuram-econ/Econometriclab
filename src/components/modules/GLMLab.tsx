@@ -506,7 +506,15 @@ export default function GLMLab({ dataset: propDataset, onRunComplete }: GLMLabPr
                     <label className="text-xs font-bold text-stone-700">2. Dependent Variable (Y)</label>
                     <select
                       value={yVar}
-                      onChange={(e) => setYVar(e.target.value)}
+                      onChange={(e) => {
+                        const newY = e.target.value;
+                        setYVar(newY);
+                        // The X checklist already hides whichever variable is
+                        // Y, but that alone doesn't clear it from xVars if it
+                        // was checked *before* being chosen as Y - without
+                        // this, the model would silently regress Y on itself.
+                        setXVars(prev => prev.filter(v => v !== newY));
+                      }}
                       className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2.5 text-xs text-stone-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     >
                       {/* CRASH GUARD ADDED */}

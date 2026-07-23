@@ -521,7 +521,12 @@ export default function RobustnessExplorer({ items, onClear }: RobustnessExplore
                     </label>
                     <select
                       value={yVar}
-                      onChange={(e) => setYVar(e.target.value)}
+                      onChange={(e) => {
+                        const newY = e.target.value;
+                        setYVar(newY);
+                        if (xVar === newY) setXVar('');
+                        setSelectedControls(selectedControls.filter(c => c !== newY));
+                      }}
                       className="form-input text-xs"
                       disabled={isRunning || !currentDataset}
                     >
@@ -538,7 +543,11 @@ export default function RobustnessExplorer({ items, onClear }: RobustnessExplore
                     </label>
                     <select
                       value={xVar}
-                      onChange={(e) => setXVar(e.target.value)}
+                      onChange={(e) => {
+                        const newX = e.target.value;
+                        setXVar(newX);
+                        setSelectedControls(selectedControls.filter(c => c !== newX));
+                      }}
                       className="form-input text-xs"
                       disabled={isRunning || !currentDataset}
                     >

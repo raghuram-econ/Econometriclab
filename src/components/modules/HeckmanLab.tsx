@@ -95,6 +95,10 @@ export default function HeckmanLab({ dataset: propDataset, onRunComplete }: Heck
 
   const handleToggleX = (v: string) => {
     setOutcomeX(prev => prev.includes(v) ? prev.filter(item => item !== v) : [...prev, v]);
+    // A variable newly added to the outcome equation can no longer serve as
+    // an exclusion restriction - the exclusion checkbox is disabled going
+    // forward, but that alone wouldn't remove it if it was checked first.
+    setExclusionZ(prev => prev.filter(item => item !== v));
   };
 
   const handleToggleZ = (v: string) => {
@@ -329,7 +333,12 @@ estimates display`
                     </label>
                     <select
                       value={outcomeY}
-                      onChange={(e) => setOutcomeY(e.target.value)}
+                      onChange={(e) => {
+                        const newY = e.target.value;
+                        setOutcomeY(newY);
+                        setOutcomeX(prev => prev.filter(v => v !== newY));
+                        setExclusionZ(prev => prev.filter(v => v !== newY));
+                      }}
                       className="w-full text-xs font-semibold px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
                     >
                       <option value="">-- Choose Y --</option>
@@ -349,7 +358,12 @@ estimates display`
                     </label>
                     <select
                       value={selectionS}
-                      onChange={(e) => setSelectionS(e.target.value)}
+                      onChange={(e) => {
+                        const newS = e.target.value;
+                        setSelectionS(newS);
+                        setOutcomeX(prev => prev.filter(v => v !== newS));
+                        setExclusionZ(prev => prev.filter(v => v !== newS));
+                      }}
                       className="w-full text-xs font-semibold px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
                     >
                       <option value="">-- Choose S --</option>

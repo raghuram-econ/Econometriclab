@@ -312,7 +312,11 @@ export default function RegularizationLab() {
               <label className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">Dependent Outcome (Y)</label>
               <select
                 value={depVar}
-                onChange={e => setDepVar(e.target.value)}
+                onChange={e => {
+                  const newY = e.target.value;
+                  setDepVar(newY);
+                  setIndepVars(indepVars.filter(v => v !== newY));
+                }}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
               >
                 <option value="">-- Select Outcome (Y) --</option>

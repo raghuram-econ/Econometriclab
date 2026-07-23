@@ -555,7 +555,11 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Binary Outcome (Y)</label>
                 <select
                   value={lpOutcome}
-                  onChange={(e) => setLpOutcome(e.target.value)}
+                  onChange={(e) => {
+                    const newY = e.target.value;
+                    setLpOutcome(newY);
+                    setLpPredictors(prev => prev.filter(v => v !== newY));
+                  }}
                   className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
                 >
                   <option value="">Select binary variable (0/1)...</option>
@@ -779,7 +783,11 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Outcome variable (Y)</label>
                 <select
                   value={tobitOutcome}
-                  onChange={(e) => setTobitOutcome(e.target.value)}
+                  onChange={(e) => {
+                    const newY = e.target.value;
+                    setTobitOutcome(newY);
+                    setTobitPredictors(prev => prev.filter(v => v !== newY));
+                  }}
                   className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
                 >
                   <option value="">Select censored outcome...</option>
@@ -937,7 +945,11 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Ordinal Outcome (Y)</label>
                 <select
                   value={orderedOutcome}
-                  onChange={(e) => setOrderedOutcome(e.target.value)}
+                  onChange={(e) => {
+                    const newY = e.target.value;
+                    setOrderedOutcome(newY);
+                    setOrderedPredictors(prev => prev.filter(v => v !== newY));
+                  }}
                   className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
                 >
                   <option value="">Select ordered scale...</option>

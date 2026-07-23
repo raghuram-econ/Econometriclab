@@ -471,10 +471,14 @@ export default function FELab({ dataset, onRunComplete, isLoading }: FELabProps)
                    <Info className="w-3 h-3" />
                  </button>
                </div>
-               <select 
+               <select
                  id="dependent-var-select"
-                 value={yVar} 
-                 onChange={(e) => setYVar(e.target.value)} 
+                 value={yVar}
+                 onChange={(e) => {
+                   const newY = e.target.value;
+                   setYVar(newY);
+                   setXVars((xVars || []).filter((v: string) => v !== newY));
+                 }}
                  className="w-full bg-white border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800 focus:ring-2 focus:ring-stone-500/10 outline-none"
                >
                   <option value="">Select target variable...</option>

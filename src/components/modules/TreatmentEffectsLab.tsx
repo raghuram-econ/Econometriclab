@@ -314,7 +314,12 @@ export default function TreatmentEffectsLab({ dataset: propDataset, onRunComplet
                     <p className="text-[10px] text-stone-400">Must be binary (0/1). Example: policy index, training.</p>
                     <select
                       value={treatVar}
-                      onChange={(e) => setTreatVar(e.target.value)}
+                      onChange={(e) => {
+                        const newTreat = e.target.value;
+                        setTreatVar(newTreat);
+                        if (outcomeVar === newTreat) setOutcomeVar('');
+                        setCovariates(prev => prev.filter(v => v !== newTreat));
+                      }}
                       className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2.5 text-xs text-stone-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     >
                       {numericVariables.map(v => (
@@ -327,7 +332,11 @@ export default function TreatmentEffectsLab({ dataset: propDataset, onRunComplet
                     <label className="text-xs font-bold text-stone-700">Causal Outcome (Y)</label>
                     <select
                       value={outcomeVar}
-                      onChange={(e) => setOutcomeVar(e.target.value)}
+                      onChange={(e) => {
+                        const newY = e.target.value;
+                        setOutcomeVar(newY);
+                        setCovariates(prev => prev.filter(v => v !== newY));
+                      }}
                       className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2.5 text-xs text-stone-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     >
                       {numericVariables.filter(v => v !== treatVar).map(v => (
