@@ -349,8 +349,8 @@ export default function Layout({ children, activeTab, onTabChange, aiPanel, onCl
         </header>
 
         {/* Desktop Header */}
-        <header className="hidden lg:flex h-16 border-b border-border-subtle items-center justify-between px-8 bg-white/80 backdrop-blur-md z-50">
-          <div className="flex items-center gap-8">
+        <header className="hidden lg:flex h-16 border-b border-border-subtle items-center justify-between gap-4 px-4 xl:px-8 bg-white/80 backdrop-blur-md z-50 overflow-x-auto">
+          <div className="flex items-center gap-4 xl:gap-8 min-w-0">
              <div className="flex items-center gap-3">
                 <span className="hidden sm:inline text-[10px] font-black uppercase text-slate-300 font-mono tracking-widest">Session:</span>
                 <div className="flex items-center gap-2">
@@ -363,7 +363,7 @@ export default function Layout({ children, activeTab, onTabChange, aiPanel, onCl
              </div>
   
              {/* Workflow Indicator */}
-             <div className="hidden xl:flex items-center gap-2">
+             <div className="hidden 2xl:flex items-center gap-2">
                 <div className="h-4 w-px bg-slate-200 mx-4" />
                 {workflowSteps.map((step, i) => (
                   <div key={step} className="flex items-center gap-2">
@@ -383,7 +383,7 @@ export default function Layout({ children, activeTab, onTabChange, aiPanel, onCl
              </div>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 xl:gap-4 flex-shrink-0">
             {/* Research | Learning Mode Toggle */}
             <div className="flex bg-slate-100 border border-slate-200 p-0.5 rounded-lg select-none mr-2">
               <button 
@@ -434,7 +434,7 @@ export default function Layout({ children, activeTab, onTabChange, aiPanel, onCl
               <Monitor className="w-4 h-4" />
               <span className="hidden lg:inline capitalize">{uiDensity}</span>
             </button>
-            <div className="hidden lg:flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-100 rounded-lg">
+            <div className="hidden 2xl:flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-100 rounded-lg">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
               <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 font-mono">
                 Connected: <span className="text-slate-900">{user?.email || 'Local Sandbox'}</span>
