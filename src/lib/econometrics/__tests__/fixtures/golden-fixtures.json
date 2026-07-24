@@ -157,6 +157,37 @@
       },
       "n_clusters": 11
     },
+    "mroz_probit": {
+      "model": "Probit",
+      "dataset": "mroz.csv",
+      "depvar": "lfp",
+      "note": "Computed live via statsmodels.Probit(lfp ~ educ + exper + age + kidslt6) on mroz.csv, 2026-07-24 -- same file and spec as mroz_logit above, for a direct Logit/Probit comparison. Uses the observed Hessian (Newton's method default), not the expected/Fisher information -- these differ for Probit's non-canonical link.",
+      "coefficients": {
+        "const": {
+          "coef": 0.858184473944,
+          "se": 0.436782883322
+        },
+        "educ": {
+          "coef": 0.111699948039,
+          "se": 0.023371159663
+        },
+        "exper": {
+          "coef": 0.072888026310,
+          "se": 0.007283776554
+        },
+        "age": {
+          "coef": -0.060799947292,
+          "se": 0.007725222546
+        },
+        "kidslt6": {
+          "coef": -0.878248725254,
+          "se": 0.115626424818
+        }
+      },
+      "llf": -409.41066245678115,
+      "pseudo_r2": 0.20483206582712132,
+      "nobs": 753
+    },
     "engel_quantile_median": {
       "model": "Quantile q=0.5",
       "dataset": "engel (statsmodels)",

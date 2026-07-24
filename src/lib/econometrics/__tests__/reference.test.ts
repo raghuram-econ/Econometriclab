@@ -65,6 +65,63 @@ describe('Logit against statsmodels (Mroz labour force participation)', () => {
   });
 });
 
+describe('Probit against statsmodels (Mroz labour force participation)', () => {
+  // statsmodels Probit(inlf ~ nwifeinc educ exper expersq age kidslt6 kidsge6),
+  // same spec as the Logit test above, same data. Computed live, 2026-07-24.
+  // Probit's link is not canonical, so its standard errors come from the
+  // observed Hessian at the MLE (statsmodels' default, Newton's method), not
+  // the expected/Fisher information IRLS naturally produces -- unlike Logit,
+  // where the two are algebraically identical.
+  const EXPECTED_EDUC_COEF = 0.1309049245;
+  const EXPECTED_EDUC_SE = 0.0252542428;
+  const EXPECTED_LLF = -401.3023148255054;
+
+  it('matches educ coefficient and standard error', () => {
+    const res = estimateModel('Probit', {
+      data: MROZ_WOOLDRIDGE, yVar: 'inlf',
+      xVars: ['nwifeinc', 'educ', 'exper', 'expersq', 'age', 'kidslt6', 'kidsge6'],
+    });
+    expect(res.n).toBe(753);
+    const educ = coef(res, 'educ');
+    expect(relErr(educ.estimate, EXPECTED_EDUC_COEF)).toBeLessThan(COEF_TOL);
+    expect(relErr(educ.stdError, EXPECTED_EDUC_SE)).toBeLessThan(SE_TOL);
+  });
+
+  it('matches the log-likelihood', () => {
+    const res = estimateModel('Probit', {
+      data: MROZ_WOOLDRIDGE, yVar: 'inlf',
+      xVars: ['nwifeinc', 'educ', 'exper', 'expersq', 'age', 'kidslt6', 'kidsge6'],
+    });
+    expect(Math.abs((res.logLikelihood as number) - EXPECTED_LLF)).toBeLessThan(0.01);
+  });
+
+  it('matches every coefficient and standard error, not just educ', () => {
+    // Regression guard for the observed-vs-expected-information fix: before
+    // it, standard errors on the least-identified coefficients (nwifeinc,
+    // kidsge6) drifted up to ~2% from statsmodels -- well outside SE_TOL.
+    const STATSMODELS: Record<string, { coef: number; se: number }> = {
+      Intercept: { coef: 0.2700775274, se: 0.5085931659 },
+      nwifeinc: { coef: -0.0120236180, se: 0.0048398761 },
+      educ: { coef: 0.1309049245, se: 0.0252542428 },
+      exper: { coef: 0.1233476308, se: 0.0187164033 },
+      expersq: { coef: -0.0018870801, se: 0.0005999864 },
+      age: { coef: -0.0528527922, se: 0.0084772371 },
+      kidslt6: { coef: -0.8683298220, se: 0.1185223014 },
+      kidsge6: { coef: 0.0360049452, se: 0.0434767953 },
+    };
+    const res = estimateModel('Probit', {
+      data: MROZ_WOOLDRIDGE, yVar: 'inlf',
+      xVars: ['nwifeinc', 'educ', 'exper', 'expersq', 'age', 'kidslt6', 'kidsge6'],
+    });
+    for (const [name, expected] of Object.entries(STATSMODELS)) {
+      const c = coef(res, name);
+      expect(c).toBeDefined();
+      expect(relErr(c.estimate, expected.coef)).toBeLessThan(COEF_TOL);
+      expect(relErr(c.stdError, expected.se)).toBeLessThan(SE_TOL);
+    }
+  });
+});
+
 describe('Tobit against Stata', () => {
   // Stata: tobit hours nwifeinc educ exper expersq age kidslt6 kidsge6, ll(0)
   // Reproduced from Wooldridge, Econometric Analysis of Cross Section and Panel

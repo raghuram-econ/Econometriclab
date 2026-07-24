@@ -123,6 +123,20 @@ describe('Econometrics Golden Fixtures', () => {
     assertClose(res.logLikelihood!, f.llf, 1e-6, 'Mroz Logit LLF');
   });
 
+  it('mroz_probit: Probit Regression', () => {
+    const data = loadCSV('mroz.csv');
+    const f = goldenFixtures.mroz_probit;
+    const res = estimateModel('Probit', { data, yVar: 'lfp', xVars: ['educ', 'exper', 'age', 'kidslt6'] });
+
+    Object.entries(f.coefficients).forEach(([varName, val]: [string, any]) => {
+      const coef = res.coefficients.find(c => c.variable === (varName === 'const' ? 'Intercept' : varName));
+      if (!coef) throw new Error(`Missing coefficient for ${varName}`);
+      assertClose(coef.estimate, val.coef, 1e-6, `Mroz Probit Coef ${varName}`);
+      assertClose(coef.stdError, val.se, 1e-4, `Mroz Probit SE ${varName}`);
+    });
+    assertClose(res.logLikelihood!, f.llf, 1e-6, 'Mroz Probit LLF');
+  });
+
   it('grunfeld_ols_clustered: OLS Clustered', () => {
     const data = loadCSV('grunfeld.csv');
     const f = goldenFixtures.grunfeld_ols_clustered;
