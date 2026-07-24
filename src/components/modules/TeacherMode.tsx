@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { PenTool, Send, GraduationCap, Sparkles, Star, ArrowUpRight, CheckCircle2, ChevronRight, RefreshCw, AlertCircle } from 'lucide-react';
 import { gradeTeacherMode, TeacherFeedback } from '../../services/gemini';
 import { useStore } from '../../store/useStore';
+import { sanitizeMath } from '../../lib/sanitizeMath';
 
 export default function TeacherMode() {
   const { addToast, teacherModeState, setTeacherModeState } = useStore();
@@ -289,7 +290,7 @@ export default function TeacherMode() {
                       overall verdict
                     </div>
                     <p className="text-sm text-rose-950 mt-2 font-medium leading-relaxed italic">
-                      "{feedback.verdict}"
+                      "{sanitizeMath(feedback.verdict)}"
                     </p>
                     <div className="text-[10px] text-rose-700/80 mt-3 font-mono">
                       Benchmarked Level: {level}
@@ -306,7 +307,7 @@ export default function TeacherMode() {
                       {(feedback.strengths || []).map((str, idx) => (
                         <div key={idx} className="flex gap-2.5 items-start p-3 bg-emerald-50/20 border border-emerald-100/50 rounded-xl text-xs text-slate-800">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 mt-1.5" />
-                          <span className="leading-relaxed">{str}</span>
+                          <span className="leading-relaxed">{sanitizeMath(str)}</span>
                         </div>
                       ))}
                     </div>
@@ -322,7 +323,7 @@ export default function TeacherMode() {
                       {(feedback.improvements || []).map((imp, idx) => (
                         <div key={idx} className="flex gap-2.5 items-start p-3 bg-rose-50/10 border border-rose-100/40 rounded-xl text-xs text-slate-800">
                           <span className="h-1.5 w-1.5 rounded-full bg-rose-600 mt-1.5" />
-                          <span className="leading-relaxed">{imp}</span>
+                          <span className="leading-relaxed">{sanitizeMath(imp)}</span>
                         </div>
                       ))}
                     </div>
@@ -339,7 +340,7 @@ export default function TeacherMode() {
                         {feedback.modelAnswerSnippets.map((snip, idx) => (
                           <div key={idx} className="p-4 bg-slate-900 border border-slate-800 rounded-xl font-mono text-xs text-slate-300 leading-normal">
                             <span className="text-emerald-400 block mb-1 font-bold text-[10px] uppercase">Scoring-perfect phrasing:</span>
-                            {snip}
+                            {sanitizeMath(snip)}
                           </div>
                         ))}
                       </div>

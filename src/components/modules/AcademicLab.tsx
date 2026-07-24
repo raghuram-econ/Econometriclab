@@ -16,6 +16,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { synthesizeAcademicLab } from '../../services/gemini';
 import { useStore } from '../../store/useStore';
+import { sanitizeMath } from '../../lib/sanitizeMath';
 import { cn, copyTextToClipboard } from '../../lib/utils';
 
 interface AcademicLabProps {
@@ -99,7 +100,7 @@ export default function AcademicLab({ initialQuestion, onClearInitialQuestion }:
 
   const handleCopy = () => {
     if (!output) return;
-    copyTextToClipboard(output).then(success => {
+    copyTextToClipboard(sanitizeMath(output)).then(success => {
       if (success) {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -245,7 +246,7 @@ export default function AcademicLab({ initialQuestion, onClearInitialQuestion }:
                     </button>
                   </div>
                   <div className="markdown-body font-serif text-sm text-stone-800 leading-relaxed text-justify">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{output}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizeMath(output)}</ReactMarkdown>
                   </div>
                 </div>
               )}
