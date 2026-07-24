@@ -494,9 +494,15 @@ export default function BatchProcessingLab() {
                         {/* Dependent select */}
                         <div className="space-y-1">
                           <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">Dependent Variable (Y)</label>
-                          <select 
+                          <select
                             value={config.yVar}
-                            onChange={(e) => handleConfigChange(ds.name, 'yVar', e.target.value)}
+                            onChange={(e) => {
+                              const newY = e.target.value;
+                              handleConfigChange(ds.name, 'yVar', newY);
+                              if (config.xVars.includes(newY)) {
+                                handleConfigChange(ds.name, 'xVars', config.xVars.filter(x => x !== newY));
+                              }
+                            }}
                             className="w-full p-2 bg-white border border-slate-200 rounded text-xs text-slate-700"
                           >
                             <option value="">Select Y...</option>
