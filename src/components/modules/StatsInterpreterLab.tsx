@@ -1250,7 +1250,10 @@ function StatsInterpreterLabComponent() {
                   <h3 className="text-sm font-black text-[#1a2744] uppercase tracking-wider">{analysisType} ESTIMATION MATRIX</h3>
                 </div>
                 <div className="text-right font-mono text-[10px] text-slate-500">
-                  N = {result?.diagnostics?.df ? (parseInt(result.diagnostics.df) + (result?.coefficients?.length ?? 0)).toString() : 'N/A'} • {toolType} ENGINE
+                  N = {(() => {
+                    const df = parseInt(result?.diagnostics?.df ?? '');
+                    return Number.isFinite(df) ? (df + (result?.coefficients?.length ?? 0)).toString() : 'Not reported';
+                  })()} • {toolType} ENGINE
                 </div>
               </div>
 
@@ -1637,7 +1640,10 @@ function StatsInterpreterLabComponent() {
                     <div className="border-t border-slate-400 mt-2 pt-2 space-y-1 text-slate-950">
                       <div className="flex justify-between">
                         <span>Observations (N)</span>
-                        <span>{result?.diagnostics?.df ? (parseInt(result.diagnostics.df) + (result?.coefficients?.length ?? 0)) : 'not reported'}</span>
+                        <span>{(() => {
+                          const df = parseInt(result?.diagnostics?.df ?? '');
+                          return Number.isFinite(df) ? (df + (result?.coefficients?.length ?? 0)) : 'not reported';
+                        })()}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>R-squared</span>
