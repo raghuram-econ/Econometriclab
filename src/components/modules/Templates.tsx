@@ -201,10 +201,10 @@ export default function Templates({ onSelect }: TemplatesProps) {
       type: 'panel' as const,
       tab: 'causal',
       icon: Factory,
-      desc: 'Synthetic Control Method to estimate the impact of new industrial corridors on regional GDP growth.',
+      desc: 'Difference-in-Differences counterfactual analysis to estimate the impact of new industrial corridors on regional GDP growth.',
       question: 'What would have been the growth trajectory of the state without the implementation of the Special Economic Zone?',
       image: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?q=80&w=800&auto=format&fit=crop',
-      badge: 'SYNTH CTRL'
+      badge: 'DIFF-IN-DIFF'
     },
     {
       id: 'card_krueger_did',
@@ -397,20 +397,8 @@ export default function Templates({ onSelect }: TemplatesProps) {
                </div>
                <h3 className="font-serif italic text-4xl lg:text-5xl font-light leading-tight">The Scientific <br />Workflow Invariant</h3>
                <p className="text-base text-slate-400 font-serif leading-relaxed max-w-md">
-                  Econometrics is a discipline of verification. Our platform enforces the professional identification sequence used by top research institutions.
+                  Econometrics is a discipline of verification. This platform enforces a four-stage identification sequence -- audit, identify, stress-test, document -- on every model you run.
                </p>
-               <div className="pt-4">
-                  <div className="flex -space-x-2">
-                     {[1,2,3,4].map(i => (
-                       <div key={i} className="w-8 h-8 rounded-full border-2 border-slate-950 bg-slate-800 flex items-center justify-center text-[10px] font-bold">
-                          {i}
-                       </div>
-                     ))}
-                     <div className="px-3 flex items-center text-[10px] text-slate-500 uppercase tracking-widest font-bold">
-                        + Active Peer Review
-                     </div>
-                  </div>
-               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                {[
