@@ -201,6 +201,35 @@
           "se": 0.013175622939475764
         }
       }
+    },
+    "did_synthetic": {
+      "model": "DiD (OLS with treated*post interaction)",
+      "dataset": "did_synthetic.csv -- 100 units x 2 periods, generated with numpy.random.RandomState(42), true DiD effect baked in at +5",
+      "note": "Computed live via statsmodels.OLS(y ~ const + treated + post + treated*post + x), 2026-07-24.",
+      "coefficients": {
+        "const": {
+          "coef": 9.773072542950,
+          "se": 0.149052187115
+        },
+        "treated": {
+          "coef": 2.110008892246,
+          "se": 0.210211253434
+        },
+        "post": {
+          "coef": 3.494256642974,
+          "se": 0.208693755279
+        },
+        "did": {
+          "coef": 4.527596659721,
+          "se": 0.295137539098
+        },
+        "x": {
+          "coef": 1.376748411063,
+          "se": 0.091210905606
+        }
+      },
+      "r2": 0.9330573521631309,
+      "nobs": 200
     }
   }
 }

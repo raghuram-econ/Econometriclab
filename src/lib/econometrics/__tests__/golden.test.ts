@@ -163,4 +163,28 @@ describe('Econometrics Golden Fixtures', () => {
       assertClose(coef.stdError, val.se, 1e-3, `Engel Quantile SE ${varName}`);
     });
   });
+
+  it('did_synthetic: Difference-in-Differences', () => {
+    const data = loadCSV('did_synthetic.csv');
+    const f = goldenFixtures.did_synthetic;
+    const res = estimateModel('DiD', {
+      data, yVar: 'y', xVars: ['treated', 'post', 'x'],
+      treatedVar: 'treated', postVar: 'post',
+    });
+
+    const labelMap: Record<string, string> = {
+      const: 'Intercept',
+      treated: 'treated',
+      post: 'post',
+      did: 'treated × post (DiD)',
+      x: 'x',
+    };
+    Object.entries(f.coefficients).forEach(([varName, val]: [string, any]) => {
+      const coef = res.coefficients.find(c => c.variable === labelMap[varName]);
+      if (!coef) throw new Error(`Missing coefficient for ${varName}`);
+      assertClose(coef.estimate, val.coef, 1e-6, `DiD Coef ${varName}`);
+      assertClose(coef.stdError, val.se, 1e-4, `DiD SE ${varName}`);
+    });
+    assertClose(res.rSquared, f.r2, 1e-6, 'DiD R2');
+  });
 });

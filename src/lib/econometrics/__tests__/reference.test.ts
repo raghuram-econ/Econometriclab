@@ -9,10 +9,20 @@
  * Do not relax these tolerances to make a failing test pass. A failure here means
  * an estimate moved away from a known-correct value.
  */
+import fs from 'fs';
+import path from 'path';
+import Papa from 'papaparse';
 import { estimateModel } from '../estimators';
 import { runTobitMLE } from '../tobit';
-import { approximateADFPValue } from '../arima';
+import { approximateADFPValue, runKPSSTest, runPhillipsPerronTest, runVAR, runGARCH } from '../arima';
 import { MROZ_WOOLDRIDGE } from '../tests/fixtures/mroz-wooldridge';
+import { MROZ_DATA } from '../tests/fixtures/mroz';
+
+const FIXTURES_DIR = path.join(process.cwd(), 'src/lib/econometrics/__tests__/fixtures');
+const loadSeries = (filename: string): number[] =>
+  fs.readFileSync(path.join(FIXTURES_DIR, filename), 'utf8').trim().split('\n').map(Number);
+const loadCSVRows = (filename: string): any[] =>
+  Papa.parse(fs.readFileSync(path.join(FIXTURES_DIR, filename), 'utf8'), { header: true, skipEmptyLines: true, dynamicTyping: true }).data as any[];
 
 const COEF_TOL = 1e-4;   // relative
 const SE_TOL = 1e-3;     // relative
@@ -122,6 +132,42 @@ describe('Probit against statsmodels (Mroz labour force participation)', () => {
   });
 });
 
+describe('IV/2SLS against linearmodels (Mroz wife earnings)', () => {
+  // linearmodels.iv.IV2SLS(hearnw ~ 1 + [educw ~ educwm]), cov_type='unadjusted',
+  // debiased=True (small-sample / n-k correction -- this codebase's convention;
+  // linearmodels' default is debiased=False, i.e. asymptotic/n-denominator SEs,
+  // which differ from ours by exactly sqrt(n/(n-k)) and are not a drift bug).
+  // Computed live, 2026-07-24.
+  const REF: Record<string, { coef: number; se: number }> = {
+    Intercept: { coef: -1.249006361734, se: 1.402040593591 },
+    educw: { coef: 0.294914557975, se: 0.113738903031 },
+  };
+
+  it('matches coefficients and standard errors', () => {
+    const data = (MROZ_DATA as any[]).filter(r => r.hearnw != null && r.educw != null && r.educwm != null);
+    const res = estimateModel('IV', {
+      data, yVar: 'hearnw', xVars: [],
+      endogenousVar: 'educw', instruments: ['educwm'],
+    });
+    expect(res.n).toBe(753);
+    for (const [name, expected] of Object.entries(REF)) {
+      const c = coef(res, name);
+      expect(c).toBeDefined();
+      expect(relErr(c.estimate, expected.coef)).toBeLessThan(COEF_TOL);
+      expect(relErr(c.stdError, expected.se)).toBeLessThan(SE_TOL);
+    }
+  });
+
+  it('matches R-squared', () => {
+    const data = (MROZ_DATA as any[]).filter(r => r.hearnw != null && r.educw != null && r.educwm != null);
+    const res = estimateModel('IV', {
+      data, yVar: 'hearnw', xVars: [],
+      endogenousVar: 'educw', instruments: ['educwm'],
+    });
+    expect(relErr(res.rSquared, 0.08905683982385526)).toBeLessThan(COEF_TOL);
+  });
+});
+
 describe('Tobit against Stata', () => {
   // Stata: tobit hours nwifeinc educ exper expersq age kidslt6 kidsge6, ll(0)
   // Reproduced from Wooldridge, Econometric Analysis of Cross Section and Panel
@@ -210,5 +256,102 @@ describe('ADF p-values against published MacKinnon critical values', () => {
     const grid = [-4, -3.43, -3.2, -2.86, -2.7, -2.57, -2.2, -1.5, -0.5];
     const values = new Set(grid.map(approximateADFPValue));
     expect(values.size).toBe(grid.length);
+  });
+});
+
+describe('KPSS against statsmodels', () => {
+  // statsmodels.tsa.stattools.kpss(series, regression='c'|'ct', nlags=7)
+  // on a stationary AR(1) series (kpss_pp_series.csv). Computed live, 2026-07-24.
+  const series = loadSeries('kpss_pp_series.csv');
+
+  it('matches the level (constant-only) statistic', () => {
+    const res = runKPSSTest(series, 7, false);
+    expect(relErr(res.kpssStat, 0.05827501495691591)).toBeLessThan(COEF_TOL);
+  });
+
+  it('matches the trend statistic', () => {
+    const res = runKPSSTest(series, 7, true);
+    expect(relErr(res.kpssStat, 0.03466732213070826)).toBeLessThan(COEF_TOL);
+  });
+});
+
+describe('Phillips-Perron against the arch package', () => {
+  // arch.unitroot.PhillipsPerron(series, lags=7, trend='c', test_type='tau'),
+  // same series as the KPSS test above. Computed live, 2026-07-24.
+  const series = loadSeries('kpss_pp_series.csv');
+
+  it('matches the Z-tau statistic', () => {
+    const res = runPhillipsPerronTest(series, 7);
+    expect(relErr(res.ppStat, -6.770185663188614)).toBeLessThan(1e-3);
+  });
+});
+
+describe('VAR against statsmodels', () => {
+  // statsmodels.tsa.api.VAR(df).fit(2, trend='c') on a synthetic bivariate
+  // system (var_series.csv). Computed live, 2026-07-24.
+  const data = loadCSVRows('var_series.csv');
+  const res = runVAR(data, ['y1', 'y2'], 2);
+
+  const REF: Record<string, Record<string, number>> = {
+    y1: { Intercept: -0.037532555766625134, y1_lag1: 0.38577591566250163, y2_lag1: 0.2346436214547734, y1_lag2: 0.01231518435514073, y2_lag2: -0.027765813002704025 },
+    y2: { Intercept: -0.0032099723904228917, y1_lag1: 0.03747934357674239, y2_lag1: 0.4769588193293007, y1_lag2: -0.052010714023933126, y2_lag2: -0.17651015582556515 },
+  };
+
+  it.each(['y1', 'y2'] as const)('matches every coefficient in the %s equation', (eq) => {
+    const coeffs = res.equations[eq]!.coefficients;
+    for (const [name, expected] of Object.entries(REF[eq]!)) {
+      expect(relErr(coeffs[name]!, expected)).toBeLessThan(COEF_TOL);
+    }
+  });
+
+  it('matches AIC and BIC', () => {
+    expect(relErr(res.aic, -0.049856033478351935)).toBeLessThan(COEF_TOL);
+    expect(relErr(res.bic, 0.11621805898096801)).toBeLessThan(COEF_TOL);
+  });
+});
+
+describe('GARCH(1,1) sanity-checked against the arch package', () => {
+  // Not a tight benchmark match like the other tests in this file: our engine
+  // fits GARCH in two steps (subtract the sample mean, then MLE the GARCH
+  // parameters on the residuals), while the arch package's Constant-mean
+  // model jointly estimates the mean and GARCH parameters in one MLE. These
+  // are both legitimate estimation strategies but are not algebraically the
+  // same, so a few percent of difference on finite samples is expected --
+  // unlike Probit/IV/etc., closer agreement here would not indicate more
+  // correctness. Reference: arch_model(series, mean='Constant', vol='GARCH',
+  // p=1, q=1).fit() on garch_series.csv, 2026-07-24.
+  const series = loadSeries('garch_series.csv');
+
+  it('lands within a few percent of the joint-MLE reference', () => {
+    const res = runGARCH(series, 1, 1);
+    expect(relErr(res.omega, 0.07970348780834749)).toBeLessThan(0.05);
+    expect(relErr(res.alpha, 0.1019894525806451)).toBeLessThan(0.05);
+    expect(relErr(res.beta, 0.8075167126656609)).toBeLessThan(0.05);
+  });
+
+  it('reaches a genuine local optimum of its own likelihood', () => {
+    // Regression guard for optimizer bugs (e.g. stopping early, or landing on
+    // a saddle point): perturbing any parameter in either direction from the
+    // fitted optimum must not increase this engine's own log-likelihood.
+    const res = runGARCH(series, 1, 1);
+    const mean = series.reduce((a, b) => a + b, 0) / series.length;
+    const e = series.map(x => x - mean);
+    const n = e.length;
+    const evalLL = (omega: number, alpha: number, beta: number) => {
+      let h = e.reduce((s, x) => s + x * x, 0) / n;
+      let ll = 0;
+      for (let t = 1; t < n; t++) {
+        h = omega + alpha * e[t - 1]! * e[t - 1]! + beta * h;
+        if (h <= 1e-6) h = 1e-6;
+        ll += -0.5 * (Math.log(2 * Math.PI) + Math.log(h) + (e[t]! * e[t]!) / h);
+      }
+      return ll;
+    };
+    const atOptimum = evalLL(res.omega, res.alpha, res.beta);
+    const step = 1e-4;
+    for (const [dOmega, dAlpha, dBeta] of [[step, 0, 0], [-step, 0, 0], [0, step, 0], [0, -step, 0], [0, 0, step], [0, 0, -step]]) {
+      const perturbed = evalLL(res.omega + dOmega!, res.alpha + dAlpha!, res.beta + dBeta!);
+      expect(perturbed).toBeLessThanOrEqual(atOptimum + 1e-6);
+    }
   });
 });
