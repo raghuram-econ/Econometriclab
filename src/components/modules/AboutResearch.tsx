@@ -24,7 +24,7 @@ export default function AboutResearch() {
   const { setActiveModule } = useStore();
   const [copied, setCopied] = useState(false);
 
-  const citationText = `Raghuram.M (2026). Economics Learning Lab (Beta): An open-access econometrics learning platform for Indian graduate economics students [Web application]. https://econometrics-lab-340743255083.asia-southeast1.run.app [Accessed: DD-MM-YYYY]`;
+  const citationText = `Raghuram.M (2026). Economics Learning Lab (Beta): An open-access econometrics learning platform for Indian graduate economics students [Web application]. https://econometrics-lab.onrender.com [Accessed: DD-MM-YYYY]`;
 
   const handleCopyCitation = () => {
     navigator.clipboard.writeText(citationText).then(() => {
