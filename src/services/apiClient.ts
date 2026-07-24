@@ -166,12 +166,15 @@ export async function runCoxPH(payload: {
   return callBackendAPI('/api/python/cox', payload);
 }
 
-// Python Backend Full ARIMA (with MA terms)
+// Python Backend Full ARIMA (Kalman-filter MLE via statsmodels, with MA terms
+// and real forecast standard errors -- the benchmark-grade path; the browser
+// engine is a lightweight CSS-based preview, see AdvancedTimeSeriesLab).
 export async function runFullARIMA(payload: {
   series: number[];
   p: number;
   d: number;
   q: number;
+  horizon?: number;
 }): Promise<any> {
   return callBackendAPI('/api/python/arima-full', payload);
 }

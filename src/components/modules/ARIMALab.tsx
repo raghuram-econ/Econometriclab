@@ -3,7 +3,7 @@ import { Play, TrendingUp, FlaskConical, Info, Sparkles, ShieldCheck, FileDown, 
 import { Dataset, ARIMAResult } from '../../types';
 import { runARIMA, autoARIMA, calculateLjungBox } from '../../lib/econometrics/arima';
 import { cn, exportToCSV } from '../../lib/utils';
-import { getAuthHeaders } from '../../services/apiClient';
+import { getAuthHeaders, runFullARIMA } from '../../services/apiClient';
 
 // Lazy load chart to reduce bundle size
 const EconometricsPlot = React.lazy(() => import('../shared/EconometricsPlot'));
@@ -26,6 +26,25 @@ interface ARIMALabProps {
   isLoading: boolean;
 }
 
+interface PythonARIMACoefficient {
+  variable: string;
+  estimate: number;
+  stdError: number;
+  tStat: number;
+  pValue: number;
+  stars: string;
+}
+
+interface PythonARIMAResult {
+  coefficients: PythonARIMACoefficient[];
+  aic: number;
+  bic: number;
+  logLikelihood: number;
+  n_obs: number;
+  forecast: number[];
+  forecastCI: [number, number][];
+}
+
 export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALabProps) {
   const [targetVar, setTargetVar] = useState<string>('');
   const [p, setP] = useState(1);
@@ -37,6 +56,9 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
   const [activeStep, setActiveStep] = useState<'projection' | 'diagnostics' | 'explanation'>('projection');
   const [mistakes, setMistakes] = useState<Mistake[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [pythonResult, setPythonResult] = useState<PythonARIMAResult | null>(null);
+  const [isPythonRunning, setIsPythonRunning] = useState(false);
+  const [pythonError, setPythonError] = useState<string | null>(null);
 
   if (!dataset) {
     return (
@@ -180,6 +202,24 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
     }
   };
 
+  const handleRunPythonBackend = async () => {
+    if (!targetVar) {
+      setPythonError('Select a target series first.');
+      return;
+    }
+    setIsPythonRunning(true);
+    setPythonError(null);
+    try {
+      const series = (dataset.data || []).map(r => parseFloat(r[targetVar]));
+      const res = await runFullARIMA({ series, p, d, q, horizon });
+      setPythonResult(res);
+    } catch (err: any) {
+      setPythonError(err.message || 'Failed to run the full ARIMA model on the Python backend.');
+    } finally {
+      setIsPythonRunning(false);
+    }
+  };
+
   const chartData = results ? [
     ...(dataset.data || []).map((r, i) => ({
       index: i,
@@ -220,13 +260,22 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
           <p className="text-sm text-slate-500 mt-1 italic font-serif">Estimate Autoregressive models to project future values through time.</p>
         </div>
         <div className="flex gap-3">
-          <button 
+          <button
             disabled={isLoading}
             onClick={handleRun}
             className="btn-primary flex items-center gap-2"
           >
             <Play className="w-4 h-4 fill-current" />
             {isLoading ? 'Projecting...' : 'Run Projection'}
+          </button>
+          <button
+            disabled={isPythonRunning || !targetVar}
+            onClick={handleRunPythonBackend}
+            title="Full Kalman-filter MLE via statsmodels on the Python backend -- real coefficient standard errors, MA terms of any order, and correctly-derived forecast intervals."
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            {isPythonRunning ? 'Running on backend...' : 'Run Benchmark-Grade (Python)'}
           </button>
         </div>
       </div>
@@ -275,10 +324,111 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
             <p className="text-sm text-amber-700">
               {error}
             </p>
-            <p className="text-xs text-amber-600 mt-2">
-              Tip: Set q = 1 or q = 2 to use the browser engine, or connect the 
-              Python backend for full ARIMA support.
+            <p className="text-xs text-amber-600 mt-2 mb-2">
+              Set q = 1 or q = 2 to use the browser preview engine, or run this
+              specification on the Python backend below for full ARIMA support.
             </p>
+            <button
+              disabled={isPythonRunning || !targetVar}
+              onClick={handleRunPythonBackend}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border border-amber-300 text-amber-800 bg-white hover:bg-amber-100 disabled:opacity-50 transition-colors"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              {isPythonRunning ? 'Running on backend...' : `Run ARIMA(${p},${d},${q}) on Python Backend`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pythonError && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+          {pythonError}
+        </div>
+      )}
+
+      {pythonResult && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-indigo-600" />
+              <p className="text-sm font-bold text-indigo-900">
+                Benchmark-Grade Results -- Python backend (statsmodels, Kalman-filter MLE)
+              </p>
+            </div>
+            <button
+              onClick={() => setPythonResult(null)}
+              className="text-xs text-indigo-500 hover:text-indigo-700"
+            >
+              Dismiss
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-white rounded-lg border border-indigo-100 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">AIC</p>
+              <p className="text-sm font-mono font-bold text-slate-900">{formatNum(pythonResult.aic, 4)}</p>
+            </div>
+            <div className="bg-white rounded-lg border border-indigo-100 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">BIC</p>
+              <p className="text-sm font-mono font-bold text-slate-900">{formatNum(pythonResult.bic, 4)}</p>
+            </div>
+            <div className="bg-white rounded-lg border border-indigo-100 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Log-Likelihood</p>
+              <p className="text-sm font-mono font-bold text-slate-900">{formatNum(pythonResult.logLikelihood, 4)}</p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-white text-slate-400 font-bold border-b border-indigo-100">
+                  <th className="p-2 text-left uppercase tracking-tight">Parameter</th>
+                  <th className="p-2 text-right uppercase tracking-tight">Estimate</th>
+                  <th className="p-2 text-right uppercase tracking-tight">Std. Error</th>
+                  <th className="p-2 text-right uppercase tracking-tight">z</th>
+                  <th className="p-2 text-right uppercase tracking-tight">p-value</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-indigo-50">
+                {pythonResult.coefficients.map(c => (
+                  <tr key={c.variable}>
+                    <td className="p-2 font-semibold text-slate-700 font-mono">{c.variable}</td>
+                    <td className="p-2 text-right tabular-nums font-mono">{formatNum(c.estimate, 4)}</td>
+                    <td className="p-2 text-right tabular-nums font-mono">{formatNum(c.stdError, 4)}</td>
+                    <td className="p-2 text-right tabular-nums font-mono">{formatNum(c.tStat, 3)}</td>
+                    <td className="p-2 text-right tabular-nums font-mono">{formatPValue(c.pValue)}{c.stars}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold mb-1.5">
+              Forecast (next {pythonResult.forecast.length} periods, 95% CI)
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-white text-slate-400 font-bold border-b border-indigo-100">
+                    <th className="p-2 text-left uppercase tracking-tight">h</th>
+                    <th className="p-2 text-right uppercase tracking-tight">Forecast</th>
+                    <th className="p-2 text-right uppercase tracking-tight">Lower 95%</th>
+                    <th className="p-2 text-right uppercase tracking-tight">Upper 95%</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-indigo-50">
+                  {pythonResult.forecast.map((f, i) => (
+                    <tr key={i}>
+                      <td className="p-2 font-mono text-slate-500">{i + 1}</td>
+                      <td className="p-2 text-right tabular-nums font-mono font-bold">{formatNum(f, 4)}</td>
+                      <td className="p-2 text-right tabular-nums font-mono text-slate-500">{formatNum(pythonResult.forecastCI[i]?.[0], 4)}</td>
+                      <td className="p-2 text-right tabular-nums font-mono text-slate-500">{formatNum(pythonResult.forecastCI[i]?.[1], 4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -455,12 +605,17 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
                     <div className="card-premium overflow-hidden">
                         <div className="p-4 bg-slate-50/80 border-b border-slate-100 flex items-center justify-between">
                           <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 font-mono">Process Parameters</h3>
-                          <button 
+                          <button
                             onClick={handleDownloadForecast}
                             className="text-[10px] font-bold text-slate-500 hover:text-blue-600 flex items-center gap-1.5 transition-colors"
                           >
                             <FileDown className="w-3 h-3" /> Export Forecast
                           </button>
+                        </div>
+                        <div className="px-4 pt-3 pb-1 text-[10px] text-slate-400 leading-relaxed">
+                          Simplified preview engine (conditional sum-of-squares) -- point estimates only, no
+                          standard errors or significance. For inference-grade output, use "Run Benchmark-Grade
+                          (Python)" above.
                         </div>
                         <div className="overflow-x-auto">
                           <table className="w-full text-left text-xs border-collapse">

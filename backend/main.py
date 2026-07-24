@@ -840,6 +840,7 @@ class ARIMARequest(BaseModel):
     p: int
     d: int
     q: int
+    horizon: int = 10
 
 @app.post("/python/arima-full")
 def run_arima_full(req: ARIMARequest):
@@ -860,7 +861,7 @@ def run_arima_full(req: ARIMARequest):
             )
         model = ARIMA(series, order=(req.p, req.d, req.q))
         res = model.fit()
-        
+
         coef_rows = []
         for name in res.params.index:
             try:
@@ -868,7 +869,7 @@ def run_arima_full(req: ARIMARequest):
                 ch = safe_float(res.conf_int()[1][name]) if name in res.conf_int()[1] else None
             except:
                 cl, ch = None, None
-                
+
             coef_rows.append(build_coef_row(
                 str(name), res.params[name], res.bse[name],
                 res.tvalues[name], res.pvalues[name]
@@ -876,13 +877,24 @@ def run_arima_full(req: ARIMARequest):
             # Just to override confLow and confHigh nicely if they failed in build_coef_row
             if cl is not None: coef_rows[-1]["confLow"] = cl
             if ch is not None: coef_rows[-1]["confHigh"] = ch
-            
+
+        horizon = max(1, min(req.horizon, 100))
+        forecast_obj = res.get_forecast(steps=horizon)
+        forecast_mean = [safe_float(v) for v in forecast_obj.predicted_mean]
+        forecast_ci_df = forecast_obj.conf_int(alpha=0.05)
+        forecast_ci = [
+            [safe_float(forecast_ci_df.iloc[i, 0]), safe_float(forecast_ci_df.iloc[i, 1])]
+            for i in range(len(forecast_ci_df))
+        ]
+
         return {
             "coefficients": coef_rows,
             "aic": round(res.aic, 4),
             "bic": round(res.bic, 4),
             "logLikelihood": round(res.llf, 4),
-            "n_obs": int(res.nobs)
+            "n_obs": int(res.nobs),
+            "forecast": forecast_mean,
+            "forecastCI": forecast_ci
         }
     except HTTPException:
         raise
