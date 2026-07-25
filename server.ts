@@ -183,8 +183,7 @@ async function startServer() {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      (req as any).user = { uid: "mock-user-123", email: "mock@domain.edu" };
-      return next();
+      return res.status(401).json({ error: "Authentication required" });
     }
 
     const token = authHeader.substring("Bearer ".length);
