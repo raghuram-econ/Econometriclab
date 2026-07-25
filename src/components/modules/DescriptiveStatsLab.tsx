@@ -854,7 +854,7 @@ export default function DescriptiveStatsLab({ dataset, uploadedData, variableMet
                     </div>
                   </div>
                   <p className="text-[10px] text-stone-500 italic font-serif leading-relaxed text-center">
-                    Null hypothesis ($H_0$): Classes are uniformly distributed across categories. Rejecting $H_0$ (p &lt; 0.05) implies a statistically significant clustering structure.
+                    Null hypothesis (H₀): Classes are uniformly distributed across categories. Rejecting H₀ (p &lt; 0.05) implies a statistically significant clustering structure.
                   </p>
                 </div>
               </div>

@@ -444,7 +444,7 @@ export default function HypothesisTests({ results, dependentVar }: HypothesisTes
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-mono">Hypothesized Value ($c$)</label>
+                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-mono">Hypothesized Value (c)</label>
                 <input
                   type="number"
                   step="0.0001"
@@ -488,11 +488,11 @@ export default function HypothesisTests({ results, dependentVar }: HypothesisTes
                     <strong className="text-slate-800 text-xs">{singleResult.stdError.toFixed(4)}</strong>
                   </div>
                   <div className="bg-white p-3 rounded-xl border border-slate-100">
-                    <span className="text-[9px] text-slate-400 uppercase block mb-0.5">$t$-Statistic</span>
+                    <span className="text-[9px] text-slate-400 uppercase block mb-0.5">t-Statistic</span>
                     <strong className="text-indigo-600 text-xs font-bold">{singleResult.tStat.toFixed(4)}</strong>
                   </div>
                   <div className="bg-white p-3 rounded-xl border border-slate-100">
-                    <span className="text-[9px] text-slate-400 uppercase block mb-0.5">$P &gt; |t|$</span>
+                    <span className="text-[9px] text-slate-400 uppercase block mb-0.5">P &gt; |t|</span>
                     <strong className={`text-xs font-bold ${singleResult.pValue <= 0.05 ? 'text-amber-500' : 'text-slate-600'}`}>{singleResult.pValue.toFixed(5)}</strong>
                   </div>
                 </div>
@@ -584,11 +584,11 @@ export default function HypothesisTests({ results, dependentVar }: HypothesisTes
                     <strong className="text-slate-800 text-xs">{lincomResult.stdError.toFixed(4)}</strong>
                   </div>
                   <div className="bg-white p-3 rounded-xl border border-slate-100">
-                    <span className="text-[9px] text-slate-400 uppercase block mb-0.5">$t$-Statistic</span>
+                    <span className="text-[9px] text-slate-400 uppercase block mb-0.5">t-Statistic</span>
                     <strong className="text-indigo-600 text-xs font-bold">{lincomResult.tStat.toFixed(4)}</strong>
                   </div>
                   <div className="bg-white p-3 rounded-xl border border-slate-100">
-                    <span className="text-[9px] text-slate-400 uppercase block mb-0.5">$P &gt; |t|$</span>
+                    <span className="text-[9px] text-slate-400 uppercase block mb-0.5">P &gt; |t|</span>
                     <strong className={`text-xs font-bold ${lincomResult.pValue <= 0.05 ? 'text-amber-500' : 'text-slate-600'}`}>{lincomResult.pValue.toFixed(5)}</strong>
                   </div>
                 </div>

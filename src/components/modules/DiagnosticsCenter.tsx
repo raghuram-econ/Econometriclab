@@ -455,7 +455,7 @@ export function DiagnosticsCenter() {
                   <div className="bg-white p-5 border border-slate-200 rounded-lg space-y-2">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[#1a2744] font-mono">IV. Condition Number Audit</p>
                     <p className="text-xs text-slate-600 font-serif leading-relaxed">
-                      The condition number calculates eigenvalues of $X'X$. The computed condition number is <strong>{conditionNumber.toFixed(2)}</strong>. Values below 15 represent near-perfect orthogonality, confirming that standard errors are fully stable and unbiased by collinearity.
+                      The condition number calculates eigenvalues of X'X. The computed condition number is <strong>{conditionNumber.toFixed(2)}</strong>. Values below 15 represent near-perfect orthogonality, confirming that standard errors are fully stable and unbiased by collinearity.
                     </p>
                   </div>
                   <div className="bg-white p-5 border border-slate-200 rounded-lg space-y-2">
@@ -580,7 +580,7 @@ export function DiagnosticsCenter() {
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[#1a2744] font-mono">I. Durbin-Watson statistic (d)</p>
                     <div className="text-3xl font-black text-slate-800 font-mono tracking-tight">{dw !== null && dw !== undefined ? dw.toFixed(4) : 'N/A'}</div>
                     <p className="text-xs text-slate-500 font-serif leading-relaxed">
-                      Durbin-Watson tests first-order serial correlation AR(1). $d \approx 2.0$ represents absolute lack of serial correlation. $d &lt; 1.5$ triggers a positive serial correlation warning.
+                      Durbin-Watson tests first-order serial correlation AR(1). d ≈ 2.0 represents absolute lack of serial correlation. d &lt; 1.5 triggers a positive serial correlation warning.
                     </p>
                     {dw !== null && dw !== undefined ? (
                       dw < 1.5 ? (

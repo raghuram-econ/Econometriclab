@@ -578,7 +578,7 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
               {results.type === 'var' ? (
                 <div className="space-y-8">
                   <p className="text-xs text-stone-600 font-serif leading-relaxed">
-                    The chart below represents the dynamic response of the system to a 1-standard-deviation structural shock. It tracks how a shock in $e_1$ or $e_2$ propagates through the feedback lag coefficients over 8 periods.
+                    The chart below represents the dynamic response of the system to a 1-standard-deviation structural shock. It tracks how a shock in e₁ or e₂ propagates through the feedback lag coefficients over 8 periods.
                   </p>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

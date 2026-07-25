@@ -8,6 +8,7 @@ import {
 import { runOLS } from '../../lib/econometrics/ols';
 import { runFixedEffects, runRandomEffects } from '../../lib/econometrics/fixed_effects';
 import { useStore } from '../../store/useStore';
+import { sanitizeMath } from '../../lib/sanitizeMath';
 import jStat from 'jstat';
 
 interface ResultsProps {
@@ -1131,7 +1132,7 @@ export default function RegressionResultsTable({
               INTELLIGENT RECOGNITION SYNTHESIS
             </h5>
             <div className="whitespace-pre-wrap font-serif leading-relaxed text-slate-600">
-              {helpExplanation}
+              {sanitizeMath(helpExplanation)}
             </div>
           </div>
         </div>
@@ -1161,7 +1162,7 @@ export default function RegressionResultsTable({
               {/* Dependent variable display */}
               <div>
                 <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">
-                  Dependent Variable ($Y$)
+                  Dependent Variable (Y)
                 </label>
                 <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-mono font-bold text-slate-600">
                   {dependentVar}
@@ -1171,7 +1172,7 @@ export default function RegressionResultsTable({
               {/* Independent variables checklist */}
               <div>
                 <label className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider block mb-1">
-                  Independent Variables to Include ($X$)
+                  Independent Variables to Include (X)
                 </label>
                 <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-xl p-3 space-y-2 bg-slate-50/50">
                   {getAvailableVariables().map((v: string) => {

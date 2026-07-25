@@ -495,13 +495,13 @@ estimates display`
                 </p>
                 <ol className="list-decimal pl-4 space-y-2 font-mono text-[10px] text-slate-700">
                   <li>
-                    <strong>Probit:</strong> Estimates participation probability $P(S_i = 1|Z_i)$ and computes the Inverse Mills Ratio (IMR):
+                    <strong>Probit:</strong> Estimates participation probability P(S_i = 1|Z_i) and computes the Inverse Mills Ratio (IMR):
                     <div className="my-1.5 font-sans font-bold text-center bg-indigo-50 border border-indigo-100 rounded p-1 text-slate-800">
                       λ_i = φ(Z_i'γ) / Φ(Z_i'γ)
                     </div>
                   </li>
                   <li>
-                    <strong>OLS:</strong> Estimates outcome $Y$ including λ_i as a covariate, correcting for selection bias!
+                    <strong>OLS:</strong> Estimates outcome Y including λ_i as a covariate, correcting for selection bias!
                   </li>
                 </ol>
               </div>

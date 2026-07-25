@@ -450,7 +450,7 @@ export default function FactorAnalysisLab({ dataset: propDataset, onRunComplete 
                   <h5 className="text-xs font-bold text-indigo-900 font-mono uppercase tracking-wider">Academic Coach Guidelines</h5>
                 </div>
                 <p className="text-xs text-stone-700 leading-relaxed font-serif italic">
-                  Look at the elbow in the Scree Plot. In our dataset, the components before the steep elbow (and with eigenvalues $\ge 1.0$) explain the bulk of structural variability. The first component PC 1 captures {results.componentMetrics[0].proportion.toFixed(1)}% of total variance, which makes it a very robust aggregate factor for subsequent regression analysis.
+                  Look at the elbow in the Scree Plot. In our dataset, the components before the steep elbow (and with eigenvalues ≥ 1.0) explain the bulk of structural variability. The first component PC 1 captures {results.componentMetrics[0].proportion.toFixed(1)}% of total variance, which makes it a very robust aggregate factor for subsequent regression analysis.
                 </p>
               </div>
             </div>

@@ -1756,11 +1756,11 @@ function StatsInterpreterLabComponent() {
                   <div className="space-y-4 font-serif text-slate-800 text-sm leading-relaxed text-justify bg-white border border-slate-200 p-6 rounded">
                     <div>
                       <h5 className="font-bold text-[#1a2744] font-sans text-xs uppercase tracking-wider mb-1">1. Estimator Consistency & Efficiency</h5>
-                      <p>The OLS estimator remains consistent under $E[u_i | x_i] = 0$. When heteroskedasticity is flagged, standard OLS standard errors lose efficiency but remain unbiased. Utilizing the HC3 sandwich matrix recovers asymptotic efficiency for inference validity.</p>
+                      <p>The OLS estimator remains consistent under E[uᵢ | xᵢ] = 0. When heteroskedasticity is flagged, standard OLS standard errors lose efficiency but remain unbiased. Utilizing the HC3 sandwich matrix recovers asymptotic efficiency for inference validity.</p>
                     </div>
                     <div>
                       <h5 className="font-bold text-[#1a2744] font-sans text-xs uppercase tracking-wider mb-1">2. Identification Strategy</h5>
-                      <p>Causal identification hinges on the exogeneity of the regressors. Fixed effects models control for all time-invariant unobserved heterogeneity ($u_i$). In instrumental variables, identification is secured via the exclusion restriction: $Cov(Z, u) = 0$ and $Cov(Z, X) \neq 0$.</p>
+                      <p>Causal identification hinges on the exogeneity of the regressors. Fixed effects models control for all time-invariant unobserved heterogeneity (uᵢ). In instrumental variables, identification is secured via the exclusion restriction: Cov(Z, u) = 0 and Cov(Z, X) ≠ 0.</p>
                     </div>
                     <div>
                       <h5 className="font-bold text-[#1a2744] font-sans text-xs uppercase tracking-wider mb-1">3. Inference Validity (Robust vs Classical)</h5>
@@ -1768,7 +1768,7 @@ function StatsInterpreterLabComponent() {
                     </div>
                     <div>
                       <h5 className="font-bold text-[#1a2744] font-sans text-xs uppercase tracking-wider mb-1">4. Specification Tests Summary</h5>
-                      <p>Ramsey's RESET test checks for non-linear omissions. The Durbin-Watson $d = {result?.diagnostics?.fStatistic ? '1.95' : 'N/A'}$ indicates whether first-order autocorrelation violates spherical disturbance requirements. Multicollinearity was audited via variance inflation factors (VIF).</p>
+                      <p>Ramsey's RESET test checks for non-linear omissions. The Durbin-Watson statistic ({result?.assumptions?.find(a => /durbin-watson/i.test(a.testName))?.statistic ?? 'not computed for this model'}) indicates whether first-order autocorrelation violates spherical disturbance requirements. Multicollinearity was audited via variance inflation factors (VIF).</p>
                     </div>
                     <div>
                       <h5 className="font-bold text-[#1a2744] font-sans text-xs uppercase tracking-wider mb-1">5. Endogeneity Concerns</h5>

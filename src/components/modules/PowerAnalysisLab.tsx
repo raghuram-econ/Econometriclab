@@ -821,7 +821,7 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
                 <ul className="list-disc pl-5 space-y-1">
                   <li><strong>Small effects (d = 0.20):</strong> Common in subtle interventions. Requires an immense sample size (N ≈ 780+) to avoid Type II errors.</li>
                   <li><strong>Standardized Effect d:</strong> Represents how many standard deviations the treatment group shifts compared to control.</li>
-                  <li><strong>Unequal Sizing:</strong> If treatment seats are limited, we shift the allocation ratio. If $r = 0.5$, control size is twice as large; this saves program budget but inflates standard errors, requiring a larger overall N to reach {targetPower * 100}% power.</li>
+                  <li><strong>Unequal Sizing:</strong> If treatment seats are limited, we shift the allocation ratio. If r = 0.5, control size is twice as large; this saves program budget but inflates standard errors, requiring a larger overall N to reach {targetPower * 100}% power.</li>
                 </ul>
               </div>
             )}
@@ -829,7 +829,7 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
             {mode === 'ols_coef' && (
               <div className="space-y-3 text-slate-600 font-serif text-[11px] leading-relaxed">
                 <p>
-                  Observational OLS regression estimates coefficients conditional on confounders. This simulation measures the statistical power for testing $H_0: \beta_j = 0$.
+                  Observational OLS regression estimates coefficients conditional on confounders. This simulation measures the statistical power for testing H₀: βⱼ = 0.
                 </p>
                 <div className="p-3 bg-white rounded border border-slate-200 font-mono text-[10px] text-slate-800 space-y-1">
                   <div className="font-bold text-center">Asymptotic SE of Regression Coefficient:</div>
@@ -838,7 +838,7 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
                   </div>
                 </div>
                 <ul className="list-disc pl-5 space-y-1">
-                  <li><strong>Multicollinearity (VIF):</strong> High correlation between your variable of interest and other controls (inflated VIF) restricts the unique variance of $X$, drastically increasing SE and lowering your chance of finding a significant slope.</li>
+                  <li><strong>Multicollinearity (VIF):</strong> High correlation between your variable of interest and other controls (inflated VIF) restricts the unique variance of X, drastically increasing SE and lowering your chance of finding a significant slope.</li>
                   <li><strong>Standard Deviation σ(X):</strong> High dispersion in your policy variable increases the "lever" effect, lowering SE and increasing power.</li>
                   <li><strong>Error Noise σ(u):</strong> High unexplained variation in the outcome increases standard errors, demanding a larger sample size to extract the true signal.</li>
                 </ul>
@@ -856,8 +856,8 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
                   <div className="text-center text-[9px] text-slate-400 mt-1">Required sample size increases by this multiplier!</div>
                 </div>
                 <ul className="list-disc pl-5 space-y-1">
-                  <li><strong>The Moulton Problem:</strong> Ignoring positive ICC ($\rho &gt; 0$) causes extreme over-rejection of the null hypothesis. Standard errors are artificially tiny without clustering, leading to false-positive policy recommendations.</li>
-                  <li><strong>Effective Sample Size:</strong> With a cluster size of $m = {clusterSize}$ and $\rho = {icc}$, the design effect is <strong>{results.designEffect?.toFixed(2)}</strong>. This means you need a total sample size that is {results.designEffect?.toFixed(1)} times larger than an unclustered study!</li>
+                  <li><strong>The Moulton Problem:</strong> Ignoring positive ICC (ρ &gt; 0) causes extreme over-rejection of the null hypothesis. Standard errors are artificially tiny without clustering, leading to false-positive policy recommendations.</li>
+                  <li><strong>Effective Sample Size:</strong> With a cluster size of m = {clusterSize} and ρ = {icc}, the design effect is <strong>{results.designEffect?.toFixed(2)}</strong>. This means you need a total sample size that is {results.designEffect?.toFixed(1)} times larger than an unclustered study!</li>
                   <li><strong>Cluster Constraint:</strong> To boost power, adding more clusters (C) is always more effective than adding more observations (m) to existing clusters, as observations inside a cluster have diminishing informational returns.</li>
                 </ul>
               </div>
