@@ -193,7 +193,7 @@ async function startServer() {
       return next();
     } catch (err) {
       console.error("[auth] verifyIdToken failed:", err);
-      return res.status(401).json({ error: "Invalid token", debug: String((err as any)?.message || err) });
+      return res.status(401).json({ error: "Invalid token" });
     }
   };
 
