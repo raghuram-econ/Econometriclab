@@ -346,7 +346,7 @@ export default function App() {
 
       const newItem: ModelHistoryItem = {
         id: Math.random().toString(36).substr(2, 9),
-        timestamp: new Date().toLocaleTimeString(),
+        timestamp: new Date().toISOString(),
         module: moduleName as any,
         specification,
         results,
