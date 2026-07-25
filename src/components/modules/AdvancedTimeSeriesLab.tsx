@@ -622,7 +622,7 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
               ) : (
                 <div className="space-y-4">
                   <p className="text-xs text-stone-600 font-serif leading-relaxed">
-                    The conditional standard deviation $\sigma_t$ plotted over time highlights volatility clustering: calm periods are punctuated by sharp spikes in variance, which then slowly decay.
+                    The conditional standard deviation σₜ plotted over time highlights volatility clustering: calm periods are punctuated by sharp spikes in variance, which then slowly decay.
                   </p>
                   <div className="h-72 border border-stone-100 p-4 rounded-xl bg-stone-50/50">
                     <ResponsiveContainer width="100%" height="100%">

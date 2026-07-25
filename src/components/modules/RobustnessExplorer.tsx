@@ -8,6 +8,7 @@ import { RobustnessItem, useStore } from '../../store/useStore';
 import { cn } from '../../lib/utils';
 import { getAuthHeaders } from '../../services/apiClient';
 import { formatNum, formatPValue } from '../../lib/formatters';
+import { sanitizeMath } from '../../lib/sanitizeMath';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { 
@@ -362,7 +363,7 @@ export default function RobustnessExplorer({ items, onClear }: RobustnessExplore
                     prose-p:leading-relaxed prose-p:font-serif prose-p:text-blue-950/80
                     prose-headings:font-serif prose-headings:italic prose-headings:text-blue-950 prose-headings:font-bold
                   ">
-                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{story}</ReactMarkdown>
+                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizeMath(story)}</ReactMarkdown>
                   </div>
                 </div>
               )}
@@ -997,7 +998,7 @@ export default function RobustnessExplorer({ items, onClear }: RobustnessExplore
                         prose-p:leading-relaxed prose-p:font-serif prose-p:text-blue-950/80
                         prose-headings:font-serif prose-headings:italic prose-headings:text-blue-950 prose-headings:font-bold
                       ">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{aiSummary}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizeMath(aiSummary)}</ReactMarkdown>
                       </div>
                     )}
                   </div>

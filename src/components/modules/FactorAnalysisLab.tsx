@@ -385,7 +385,7 @@ export default function FactorAnalysisLab({ dataset: propDataset, onRunComplete 
                     <li>Each subsequent PC is entirely uncorrelated with the others, preventing multicollinearity when these indices are used in subsequent regressions.</li>
                   </ul>
                   <p className="text-xs text-stone-600 leading-relaxed font-serif">
-                    <strong>Kaiser Criterion:</strong> Retain only those components with eigenvalues $\lambda \ge 1.0$, which explain more variance than a single standardized variable.
+                    <strong>Kaiser Criterion:</strong> Retain only those components with eigenvalues λ ≥ 1.0, which explain more variance than a single standardized variable.
                   </p>
                 </div>
               </div>

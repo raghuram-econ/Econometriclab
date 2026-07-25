@@ -665,7 +665,7 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                     </table>
                   </div>
                   <span className="text-[10px] text-stone-400 block mt-2 font-serif italic">
-                    * MEM: Marginal Effects at the Mean ($$\partial P/\partial x$$) represents the derivative of the probability of a positive outcome with respect to the continuous regressor, evaluated at sample averages.
+                    * MEM: Marginal Effects at the Mean (∂P/∂x) represents the derivative of the probability of a positive outcome with respect to the continuous regressor, evaluated at sample averages.
                   </span>
                 </div>
 
@@ -1002,7 +1002,7 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                   <div>
                     <h4 className="text-xs font-bold uppercase tracking-wider text-stone-800">Proportional Odds Assumption Note</h4>
                     <p className="text-xs mt-0.5 leading-relaxed">
-                      Ordered Logit models assume the coefficients ($$\beta$$) are invariant across cutpoints. If this "parallel lines" assumption is violated, the coefficients would significantly diverge across thresholds, requiring a Generalized Ordered Logit or Multinomial framework instead.
+                      Ordered Logit models assume the coefficients (β) are invariant across cutpoints. If this "parallel lines" assumption is violated, the coefficients would significantly diverge across thresholds, requiring a Generalized Ordered Logit or Multinomial framework instead.
                     </p>
                   </div>
                 </div>

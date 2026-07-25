@@ -13,6 +13,7 @@ import remarkGfm from 'remark-gfm';
 import { useStore } from '../../store/useStore';
 import { askProfessorDesk } from '../../services/gemini';
 import { cn } from '../../lib/utils';
+import { sanitizeMath } from '../../lib/sanitizeMath';
 
 interface Message {
   role: 'user' | 'professor';
@@ -133,7 +134,7 @@ export default function ProfessorDesk({ initialQuestion, onClearInitialQuestion 
                   {m.role === 'user' ? 'Scholar' : 'Professor'}
                 </div>
                 <div className="markdown-body font-serif text-justify">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizeMath(m.text)}</ReactMarkdown>
                 </div>
               </div>
             ))}

@@ -431,7 +431,7 @@ export default function HypothesisTests({ results, dependentVar }: HypothesisTes
           <div className="space-y-4 animate-in fade-in duration-300">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-mono">Select Coefficient ($\beta_j$)</label>
+                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-mono">Select Coefficient (βⱼ)</label>
                 <select
                   value={singleVar}
                   onChange={(e) => setSingleVar(e.target.value)}
