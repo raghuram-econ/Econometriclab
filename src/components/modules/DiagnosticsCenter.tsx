@@ -395,7 +395,11 @@ export function DiagnosticsCenter() {
                 <div className="bg-white p-5 border border-slate-200 rounded-lg space-y-2">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-[#1a2744] font-mono">III. Fitted Values vs Residuals Scatter Pattern</p>
                   <p className="text-xs text-slate-600 font-serif leading-relaxed">
-                    A scatter evaluation of residuals e_i on predicted estimates y_i reveals constant vertical variance across the scale. No distinct funnel or curvature is visible, indicating that linearity holds and there is no latent heteroskedasticity.
+                    {bpP != null
+                      ? (bpP < 0.05
+                        ? `A scatter evaluation of residuals e_i on predicted estimates y_i is summarized by the Breusch-Pagan test (p = ${bpP.toFixed(4)}), which rejects the null of constant variance -- the residual spread widens or narrows systematically across the fitted range, indicating heteroskedasticity.`
+                        : `A scatter evaluation of residuals e_i on predicted estimates y_i is summarized by the Breusch-Pagan test (p = ${bpP.toFixed(4)}), which does not reject the null of constant variance -- consistent with a stable vertical spread across the fitted range and no evidence of heteroskedasticity.`)
+                      : 'Heteroskedasticity diagnostics are not computed for this model type, so no scatter-pattern conclusion is available here.'}
                   </p>
                 </div>
               </div>
@@ -641,23 +645,25 @@ export function DiagnosticsCenter() {
                   <h4 className="text-xs font-bold uppercase tracking-wider text-[#1a2744] font-mono">Functional Form Specification & RESET tests</h4>
                 </div>
 
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-800 font-mono font-bold uppercase tracking-wide">
+                  Not yet implemented -- these tests are not computed for any model in this lab.
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="bg-white p-5 border border-slate-200 rounded-lg space-y-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[#1a2744] font-mono">I. Ramsey RESET Test (Omitted Variables)</p>
                     <div className="flex justify-between items-baseline">
-                      <span className="font-mono text-xl font-bold">F-stat = 1.25</span>
-                      <span className="font-mono text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">p = 0.2852</span>
+                      <span className="font-mono text-sm font-bold text-slate-400">Not computed for this model</span>
                     </div>
                     <p className="text-xs text-slate-500 font-serif leading-relaxed">
-                      RESET tests whether non-linear combinations of fitted values help explain the dependent variable. A high p-value confirms that the linear-additive specification is mathematically correct and free from severe omitted non-linearities.
+                      RESET tests whether non-linear combinations of fitted values help explain the dependent variable. A high p-value would indicate the linear-additive specification is unlikely to suffer from severe omitted non-linearities.
                     </p>
                   </div>
 
                   <div className="bg-white p-5 border border-slate-200 rounded-lg space-y-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[#1a2744] font-mono">II. Pregibon Link Test for Model Specification</p>
                     <div className="flex justify-between items-baseline">
-                      <span className="font-mono text-xl font-bold">hat_sq coeff p = 0.42</span>
-                      <span className="font-mono text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">p = 0.4215</span>
+                      <span className="font-mono text-sm font-bold text-slate-400">Not computed for this model</span>
                     </div>
                     <p className="text-xs text-slate-500 font-serif leading-relaxed">
                       Regresses y on fitted values (ŷ) and squared fitted values (ŷ²). If ŷ² is significant (p &lt; 0.05), it suggests a specification error (wrong functional form or omitted variables).
@@ -676,6 +682,10 @@ export function DiagnosticsCenter() {
                     <h4 className="text-xs font-bold uppercase tracking-wider text-[#1a2744] font-mono">Model Comparison Matrix</h4>
                   </div>
                   <span className="text-[9px] text-slate-500 font-mono">Academic Comparison View</span>
+                </div>
+
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-800 font-mono font-bold uppercase tracking-wide">
+                  Illustrative template -- not computed from your data. This lab does not yet track multiple saved models side by side.
                 </div>
 
                 <div className="overflow-x-auto bg-white border border-slate-200 rounded-lg">
