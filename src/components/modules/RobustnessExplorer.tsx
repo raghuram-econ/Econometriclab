@@ -252,7 +252,9 @@ export default function RobustnessExplorer({ items, onClear }: RobustnessExplore
   const allVars = Array.from(new Set(items.flatMap(item => 
     ((item.results || {}).coefficients || []).map((c: any) => c.variable)
   )));
-  const focalVar = items[0]?.results?.coefficients?.[0]?.variable || '';
+  const focalVar = items[0]?.results?.coefficients?.find(
+    (c: any) => c.variable !== 'Intercept' && c.variable !== 'Intercept (Constant)' && c.variable !== '_cons'
+  )?.variable || '';
 
   // Sort and index curve results for charts
   const sortedCurveResults = React.useMemo(() => {
