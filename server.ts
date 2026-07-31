@@ -1124,7 +1124,7 @@ EXAM TARGET: ${level}`;
 
 CRITICAL FORMATTING AND CONTENT RULES:
 1. NEVER use LaTeX $...$ or $$...$$ strings under any circumstances.
-2. Always use Unicode math/characters for mathematical variables and equations: Î²â‚€, Î²â‚, Îµ, ÏƒÂ², RÂ², Î£, Î²Ì‚, Å·, Î¼, â†’ etc.
+2. Use plain-text ASCII math notation only (for example: beta_0, beta_1, epsilon, sigma^2, R^2, Sigma, y-hat, mu, ->). Do NOT use combining Unicode accent characters, subscripts, superscripts, or LaTeX.
 3. If a statistic is not present in the RESULTS (JSON), return null and never invent, extrapolate, or hallucinate a value. Cite ONLY numbers explicitly present in the RESULTS (JSON).
 4. Keep the tone for Beginner: respectful, clear, pedagogical, like Wooldridge's Chapter 2 textbook explanations. Avoid condescending language or childish analogies.
 5. Keep the tone for Advanced: terse, technical, direct, like an academic journal referee report or a dissertation supervisor's marginal comments.
@@ -1238,7 +1238,7 @@ Focus on:
 1. The range and median of the coefficient estimates for the focal variable.
 2. The percentage of specifications that are statistically significant at the 5% level.
 3. Specific choices or combinations of choices (like standard error adjustments, specific control sets, estimators, or outlier trims) that cause the coefficient to lose significance or flip signs.
-4. Keep the tone clinical, objective, and highly scholarly (no marketing hype). Use Unicode mathematical symbols (like Î², p-value, etc.) but no LaTeX.`;
+4. Keep the tone clinical, objective, and highly scholarly (no marketing hype). Use plain-text ASCII notation for math (for example: beta, p-value, R^2); do NOT use LaTeX or combining Unicode accent characters.`;
 
       const prompt = `Please summarize the following specification curve results:
 Focal Variable: ${xVar}
@@ -2144,7 +2144,7 @@ CORE RULES:
         }
 
         if (!matched) {
-          warningsSet.add(`Value ${respStr} not found in your pasted output â€” verify before use.`);
+          warningsSet.add(`Value ${respStr} not found in your pasted output — verify before use.`);
         }
       }
 
@@ -2186,7 +2186,7 @@ CORE RULES:
       if (tjLower.includes("aer") || tjLower.includes("american economic review") ||
           tjLower.includes("qje") || tjLower.includes("quarterly journal of economics") ||
           tjLower.includes("jpe") || tjLower.includes("journal of political economy")) {
-        // AER/QJE/JPE: 10,000â€“12,000 words total, very technical, referee-level
+        // AER/QJE/JPE: 10,000–12,000 words total, very technical, referee-level
         const targets = {
           abstract: 250,
           introduction: 1500,
@@ -2203,7 +2203,7 @@ CORE RULES:
                  tjLower.includes("ej") || tjLower.includes("economic journal") ||
                  tjLower.includes("review of economic studies") || tjLower.includes("restud") ||
                  tjLower.includes("journal of labor economics") || tjLower.includes("jle")) {
-        // JDE/JEEM/EJ/REStud/JLE: 8,000â€“10,000 words, applied focus
+        // JDE/JEEM/EJ/REStud/JLE: 8,000–10,000 words, applied focus
         const targets = {
           abstract: 200,
           introduction: 1200,

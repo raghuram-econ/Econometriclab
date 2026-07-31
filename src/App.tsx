@@ -1158,17 +1158,31 @@ export default function App() {
     let parsedPrimary: any = null;
     let parsedSecondary: any = null;
 
+    // Strip markdown code fences and isolate the JSON object, so a response
+    // wrapped in ```json ... ``` (or with leading/trailing prose) still parses
+    // instead of falling back to dumping the raw string in the panel.
+    const cleanJson = (s: string) => {
+      const stripped = s.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const start = stripped.indexOf('{');
+      const end = stripped.lastIndexOf('}');
+      return start !== -1 && end !== -1 ? stripped.slice(start, end + 1) : stripped;
+    };
+
     try {
-      if (primaryJson.trim().startsWith('{')) {
-        parsedPrimary = JSON.parse(primaryJson);
+      const c = cleanJson(primaryJson);
+      if (c.startsWith('{')) {
+        parsedPrimary = JSON.parse(c);
       }
     } catch (e) {
       console.error("Failed to parse econometric review JSON:", e);
     }
 
     try {
-      if (secondaryJson && secondaryJson.trim().startsWith('{')) {
-        parsedSecondary = JSON.parse(secondaryJson);
+      if (secondaryJson) {
+        const c = cleanJson(secondaryJson);
+        if (c.startsWith('{')) {
+          parsedSecondary = JSON.parse(c);
+        }
       }
     } catch (e) {
       console.error("Failed to parse secondary econometric review JSON:", e);

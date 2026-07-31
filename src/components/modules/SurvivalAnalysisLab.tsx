@@ -14,6 +14,7 @@ import {
 import { Dataset } from '../../types';
 import { generateMasterDataset } from '../../lib/dataGenerators';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
+import { runCoxPH } from '../../services/apiClient';
 import { ResponsiveContainer, LineChart as RecLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 
 interface SurvivalAnalysisLabProps {
@@ -109,8 +110,16 @@ export default function SurvivalAnalysisLab({ dataset: propDataset, onRunComplet
   const [groupVar, setGroupVar] = useState<string>('None');
   const [results, setResults] = useState<any | null>(null);
   const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'selection' | 'curves' | 'table'>('selection');
+  const [activeTab, setActiveTab] = useState<'selection' | 'curves' | 'table' | 'cox'>('selection');
   const [survivalError, setSurvivalError] = useState<string | null>(null);
+
+  // Cox Proportional Hazards (Python / lifelines) state
+  const [coxCovars, setCoxCovars] = useState<string[]>([]);
+  const [coxResults, setCoxResults] = useState<any | null>(null);
+  const [coxRunning, setCoxRunning] = useState<boolean>(false);
+  const [coxError, setCoxError] = useState<string | null>(null);
+  const toggleCoxCovar = (v: string) =>
+    setCoxCovars(prev => (prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]));
 
   React.useEffect(() => {
     if (numericVariables.length > 1) {
@@ -211,6 +220,47 @@ export default function SurvivalAnalysisLab({ dataset: propDataset, onRunComplet
     }, 600);
   };
 
+  const handleRunCox = async () => {
+    if (!activeDataset || !timeVar || !eventVar || coxCovars.length === 0) return;
+
+    // Cox needs a binary event indicator (1 = event, 0 = censored), same as KM.
+    const eventValues = Array.from(new Set(
+      (activeDataset.data || []).map(row => parseInt(row[eventVar])).filter(v => !isNaN(v))
+    ));
+    if (!eventValues.every(v => v === 0 || v === 1)) {
+      setCoxError(`Event Indicator "${eventVar}" must be binary (0 = censored, 1 = event). Found: ${eventValues.slice(0, 6).join(', ')}.`);
+      return;
+    }
+
+    // Keep only rows where duration, event and every covariate are finite numbers.
+    const cols = [timeVar, eventVar, ...coxCovars];
+    const clean = (activeDataset.data || []).filter(row =>
+      cols.every(c => row[c] !== undefined && row[c] !== null && !isNaN(parseFloat(row[c])))
+    );
+    if (clean.length < coxCovars.length + 2) {
+      setCoxError(`Not enough complete observations (${clean.length}) for ${coxCovars.length} covariate(s).`);
+      return;
+    }
+
+    setCoxError(null);
+    setCoxRunning(true);
+    try {
+      const res = await runCoxPH({
+        time: clean.map(r => parseFloat(r[timeVar])),
+        event: clean.map(r => parseInt(r[eventVar])),
+        covariates: clean.map(r => coxCovars.map(c => parseFloat(r[c]))),
+        covarNames: coxCovars,
+      });
+      setCoxResults(res);
+      setActiveTab('cox');
+      onRunComplete?.(res, `Cox PH: ${timeVar} ~ ${coxCovars.join(' + ')} (event: ${eventVar})`);
+    } catch (err: any) {
+      setCoxError(err?.message || 'Cox estimation failed. Ensure the Python backend is running.');
+    } finally {
+      setCoxRunning(false);
+    }
+  };
+
   return (
     <div id="survival-analysis-lab" className="max-w-5xl mx-auto px-4 py-8 space-y-8 animate-in fade-in duration-700">
       <ModuleIntroCard 
@@ -239,12 +289,13 @@ export default function SurvivalAnalysisLab({ dataset: propDataset, onRunComplet
         </div>
       ) : (
         <div className="space-y-8">
-          {results && (
+          {(results || coxResults) && (
             <div className="flex bg-stone-100 p-1 rounded-xl w-full sm:w-fit mx-auto overflow-x-auto custom-scrollbar">
               {[
                 { id: 'selection', label: '1. Duration Parameters', icon: Binary },
                 { id: 'curves', label: '2. Kaplan-Meier Curves', icon: LineChart },
                 { id: 'table', label: '3. Attrition Life Table', icon: LayoutGrid },
+                ...(coxResults ? [{ id: 'cox', label: '4. Cox Hazard Model', icon: BrainCircuit }] : []),
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -326,6 +377,53 @@ export default function SurvivalAnalysisLab({ dataset: propDataset, onRunComplet
                   {survivalError && (
                     <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-3 leading-relaxed">
                       {survivalError}
+                    </p>
+                  )}
+                </div>
+
+                {/* Cox Proportional Hazards settings */}
+                <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-stone-400 font-mono">Cox Proportional Hazards</h3>
+                  <p className="text-[10px] text-stone-400 leading-relaxed">
+                    Estimate how covariates shift the hazard rate, using the same Duration (t) and Event (d) above. Runs on the Python (lifelines) engine.
+                  </p>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-stone-700">Covariates (X)</label>
+                    <div className="max-h-44 overflow-y-auto custom-scrollbar border border-stone-100 rounded-xl p-2 space-y-1">
+                      {numericVariables.filter(v => v !== timeVar && v !== eventVar).map(v => {
+                        const on = coxCovars.includes(v);
+                        return (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => toggleCoxCovar(v)}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[11px] font-medium transition ${on ? 'bg-indigo-600 text-white' : 'bg-stone-50 text-stone-600 hover:bg-stone-100'}`}
+                          >
+                            <span className="font-mono">{v}</span>
+                            <span className={`w-2 h-2 rounded-full ${on ? 'bg-white' : 'bg-stone-300'}`} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleRunCox}
+                    disabled={coxRunning || !timeVar || !eventVar || coxCovars.length === 0}
+                    className="w-full py-3 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold font-mono tracking-wider uppercase transition shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {coxRunning ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Fitting Cox model...
+                      </>
+                    ) : (
+                      <>
+                        <BrainCircuit className="w-3.5 h-3.5" /> Fit Cox Model
+                      </>
+                    )}
+                  </button>
+                  {coxError && (
+                    <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-3 leading-relaxed">
+                      {coxError}
                     </p>
                   )}
                 </div>
@@ -450,6 +548,64 @@ export default function SurvivalAnalysisLab({ dataset: propDataset, onRunComplet
                    लाइफ table is only detailed in single curve mode. Switch your stratifying variable to "None" to output detailed survival tables.
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'cox' && coxResults && (
+            <div className="bg-white border border-stone-200 rounded-2xl p-8 shadow-sm space-y-6">
+              <div className="border-b border-stone-100 pb-4">
+                <h4 className="text-lg font-serif font-bold text-stone-900">Cox Proportional Hazards Model</h4>
+                <p className="text-xs text-stone-500 font-mono mt-1">
+                  Duration: {timeVar} | Event: {eventVar} | Covariates: {coxCovars.join(', ')}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Observations (n)', value: coxResults.n },
+                  { label: 'Events', value: coxResults.nEvents },
+                  { label: 'Concordance', value: typeof coxResults.concordanceIndex === 'number' ? coxResults.concordanceIndex.toFixed(3) : '—' },
+                  { label: 'Log-Likelihood', value: typeof coxResults.logLikelihood === 'number' ? coxResults.logLikelihood.toFixed(2) : '—' },
+                ].map(stat => (
+                  <div key={stat.label} className="bg-stone-50 border border-stone-100 rounded-xl p-4 text-center">
+                    <span className="text-[10px] font-mono font-bold uppercase text-stone-400 block">{stat.label}</span>
+                    <span className="text-lg font-mono font-bold text-stone-800">{stat.value}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="overflow-x-auto border border-stone-100 rounded-xl">
+                <table className="w-full text-left border-collapse text-xs font-mono">
+                  <thead>
+                    <tr className="bg-stone-50 text-stone-500 uppercase text-[10px] border-b border-stone-100">
+                      <th className="p-3 font-bold">Covariate</th>
+                      <th className="p-3 font-bold text-right">Coef (β)</th>
+                      <th className="p-3 font-bold text-right">Hazard Ratio</th>
+                      <th className="p-3 font-bold text-right">Std. Error</th>
+                      <th className="p-3 font-bold text-right">p-value</th>
+                      <th className="p-3 font-bold text-right">95% CI (HR)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-50">
+                    {(coxResults.coefficients || []).map((c: any) => (
+                      <tr key={c.variable} className="hover:bg-stone-50">
+                        <td className="p-3 font-bold text-stone-900">{c.variable}</td>
+                        <td className="p-3 text-right text-stone-600">{typeof c.estimate === 'number' ? c.estimate.toFixed(4) : '—'}</td>
+                        <td className="p-3 text-right text-indigo-700 font-bold">{typeof c.hazardRatio === 'number' ? c.hazardRatio.toFixed(4) : '—'}{c.stars}</td>
+                        <td className="p-3 text-right text-stone-600">{typeof c.stdError === 'number' ? c.stdError.toFixed(4) : '—'}</td>
+                        <td className="p-3 text-right text-stone-600">{typeof c.pValue === 'number' ? c.pValue.toFixed(4) : '—'}</td>
+                        <td className="p-3 text-right text-stone-500">
+                          {typeof c.confLow === 'number' && typeof c.confHigh === 'number' ? `[${c.confLow.toFixed(3)}, ${c.confHigh.toFixed(3)}]` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-4 text-[11px] text-stone-600 font-serif leading-relaxed">
+                A hazard ratio above 1 means the covariate raises the instantaneous risk of the event (shorter survival); below 1 means it lowers the risk (longer survival). Significance markers: * p&lt;0.1, ** p&lt;0.05, *** p&lt;0.01.
+              </div>
             </div>
           )}
         </div>
