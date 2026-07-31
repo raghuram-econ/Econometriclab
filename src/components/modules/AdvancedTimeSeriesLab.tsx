@@ -14,6 +14,7 @@ import {
 import { Dataset } from '../../types';
 import { generateMasterDataset } from '../../lib/dataGenerators';
 import { runJohansen } from '../../services/apiClient';
+import { runGARCH, runGrangerCausality } from '../../lib/econometrics/arima';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
 import { ResponsiveContainer, LineChart as RecLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import * as math from 'mathjs';
@@ -226,9 +227,21 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
             shockY2_respY2: irf2_y2[step] ?? 0,
           }));
 
+          // Granger causality in both directions via the certified test
+          let granger: any = null;
+          try {
+            const gcData = series1.map((v, i) => ({ [varY1]: v, [varY2]: series2[i] ?? 0 }));
+            granger = {
+              lag: lagOrder,
+              xToY: runGrangerCausality(gcData, varY1, varY2, lagOrder),
+              yToX: runGrangerCausality(gcData, varY2, varY1, lagOrder),
+            };
+          } catch (_e) { granger = null; }
+
           setResults({
             type: 'var',
             n: n_reg,
+            granger,
             varY1,
             varY2,
             equation1: {
@@ -252,38 +265,35 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
           setActiveTab('results');
         } 
         else {
-          // ARCH / GARCH (1,1) model on series1 residuals
-          // sigma_t^2 = omega + alpha * e_{t-1}^2 + beta * sigma_{t-1}^2
+          // ARCH / GARCH(1,1) fitted by maximum likelihood via the certified
+          // estimator. (This branch previously used hardcoded placeholder
+          // parameters instead of estimating them from the data.)
           const mean1 = series1.reduce((sum, v) => sum + v, 0) / len;
           const residuals = series1.map(v => v - mean1);
 
-          // Simulated GARCH optimization / parameter fitting
-          const omega = 0.05;   // baseline volatility
-          const alpha = 0.15;   // ARCH effect
-          const beta  = 0.70;   // GARCH persistence (alpha + beta = 0.85 < 1, ensures stationarity)
+          const garch = runGARCH(series1, 1, 1);
 
-          const condVariance: number[] = [omega / (1 - alpha - beta)]; // Unconditional variance as start
-          for (let t = 1; t < len; t++) {
-            const r_prev = residuals[t-1] ?? 0;
-            const cv_prev = condVariance[t-1] ?? 0;
-            const sig2 = omega + alpha * (r_prev ** 2) + beta * cv_prev;
-            condVariance.push(sig2);
-          }
-
-          const volSeries = condVariance.map((v, idx) => ({
+          const volSeries = garch.conditionalVariance.map((cv, idx) => ({
             time: idx,
             residual: residuals[idx] ?? 0,
-            volatility: Math.sqrt(v)
+            volatility: Math.sqrt(Math.max(cv, 0))
           }));
+
+          const denom = 1 - garch.alpha - garch.beta;
+          const unconditionalVol = denom > 1e-8 ? Math.sqrt(garch.omega / denom) : NaN;
 
           setResults({
             type: 'garch',
             n: len,
             variable: varY1,
-            omega,
-            alpha,
-            beta,
-            unconditionalVol: Math.sqrt(omega / (1 - alpha - beta)),
+            omega: garch.omega,
+            alpha: garch.alpha,
+            beta: garch.beta,
+            persistence: garch.persistence,
+            logLik: garch.logLik,
+            aic: garch.aic,
+            bic: garch.bic,
+            unconditionalVol,
             volSeries
           });
           setActiveTab('results');
@@ -493,6 +503,7 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
               </h4>
 
               {results.type === 'var' ? (
+                <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   {/* Eq 1 */}
                   <div className="border border-stone-100 rounded-xl p-5 bg-stone-50/50 space-y-4">
@@ -532,6 +543,24 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
                     </div>
                   </div>
                 </div>
+
+                {results.granger && (
+                  <div className="bg-white border border-stone-100 rounded-xl p-5 space-y-3">
+                    <h5 className="text-[10px] font-mono font-bold uppercase tracking-widest text-stone-400">Granger Causality (lag {results.granger.lag})</h5>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      <div className="p-3 bg-stone-50 border border-stone-100 rounded-lg font-mono">
+                        <div className="text-stone-500">{results.varY2} &rarr; {results.varY1}</div>
+                        <div className="mt-1">F = {results.granger.xToY.fStat.toFixed(3)}, p = {results.granger.xToY.pValue.toFixed(4)} {results.granger.xToY.isGranger ? <span className="text-rose-600 font-bold">causal</span> : <span className="text-stone-400">not causal</span>}</div>
+                      </div>
+                      <div className="p-3 bg-stone-50 border border-stone-100 rounded-lg font-mono">
+                        <div className="text-stone-500">{results.varY1} &rarr; {results.varY2}</div>
+                        <div className="mt-1">F = {results.granger.yToX.fStat.toFixed(3)}, p = {results.granger.yToX.pValue.toFixed(4)} {results.granger.yToX.isGranger ? <span className="text-rose-600 font-bold">causal</span> : <span className="text-stone-400">not causal</span>}</div>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-stone-400 font-serif italic">"X &rarr; Y causal" means past values of X significantly improve the prediction of Y (Granger sense, not structural causation).</p>
+                  </div>
+                )}
+                </>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="bg-stone-50 border border-stone-100 p-4 rounded-xl text-center">

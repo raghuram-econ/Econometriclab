@@ -17,7 +17,7 @@ import { generateMasterDataset } from '../../lib/dataGenerators';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
 import jStat from 'jstat';
 import * as math from 'mathjs';
-import { approximateADFPValue } from '../../lib/econometrics/arima';
+import { approximateADFPValue, runKPSSTest, runPhillipsPerronTest } from '../../lib/econometrics/arima';
 
 interface StatTestsLabProps {
   dataset: Dataset | null;
@@ -58,7 +58,7 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
   }, [activeDataset]);
 
   // Selected variables and test settings
-  const [testType, setTestType] = useState<'normality' | 'stationarity' | 'autocorrelation' | 'specification'>('normality');
+  const [testType, setTestType] = useState<'normality' | 'stationarity' | 'kpss' | 'phillips' | 'autocorrelation' | 'specification'>('normality');
   const [selectedVar, setSelectedVar] = useState<string>('');
   const [selectedVarX, setSelectedVarX] = useState<string>(''); // For specification / autocorrelation auxiliary OLS
   const [lagLength, setLagLength] = useState<number>(1);
@@ -298,7 +298,37 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
             decision: pValue < 0.05 ? "Reject Null (Omitted non-linearities exist)" : "Fail to Reject (No model specification issues)"
           });
         }
-        
+        else if (testType === 'kpss') {
+          const kpss = runKPSSTest(values, lagLength, true);
+          const rejectNull = !kpss.isStationary;
+          setTestResult({
+            type: 'kpss',
+            variable: selectedVar,
+            n: N,
+            stat: kpss.kpssStat,
+            pValue: null,
+            reject: rejectNull,
+            criticalValues: { '1%': kpss.criticalValues.pct1, '5%': kpss.criticalValues.pct5, '10%': kpss.criticalValues.pct10 },
+            nullHypothesis: "The variable is (trend-)stationary.",
+            altHypothesis: "The variable has a unit root (is non-stationary).",
+            decision: rejectNull ? "Reject Null (Non-Stationary)" : "Fail to Reject Null (Stationary)"
+          });
+        }
+        else if (testType === 'phillips') {
+          const pp = runPhillipsPerronTest(values, lagLength);
+          setTestResult({
+            type: 'phillips',
+            variable: selectedVar,
+            n: N,
+            stat: pp.ppStat,
+            pValue: pp.pValue,
+            criticalValues: { '1%': -3.46, '5%': -2.88, '10%': -2.57 },
+            nullHypothesis: "The variable has a unit root (is non-stationary).",
+            altHypothesis: "The variable is stationary (has no unit root).",
+            decision: pp.isStationary ? "Reject Null (Stationary)" : "Fail to Reject Null (Non-Stationary)"
+          });
+        }
+
         if (onRunComplete) {
           onRunComplete(
             { testType, selectedVar, n: N },
@@ -352,6 +382,8 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
                   {[
                     { id: 'normality', label: 'Jarque-Bera Normality Test' },
                     { id: 'stationarity', label: 'Augmented Dickey-Fuller (ADF)' },
+                    { id: 'kpss', label: 'KPSS Stationarity Test' },
+                    { id: 'phillips', label: 'Phillips-Perron (PP) Test' },
                     { id: 'autocorrelation', label: 'Durbin-Watson Autocorrelation' },
                     { id: 'specification', label: 'Ramsey RESET Specification' },
                   ].map((test) => (
@@ -434,14 +466,18 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
                     <h4 className="text-lg font-serif font-bold text-stone-900">
                       {testResult.type === 'normality' && 'Jarque-Bera Normality Test Output'}
                       {testResult.type === 'stationarity' && 'Augmented Dickey-Fuller Test Output'}
+                      {testResult.type === 'kpss' && 'KPSS Stationarity Test Output'}
+                      {testResult.type === 'phillips' && 'Phillips-Perron Test Output'}
                       {testResult.type === 'autocorrelation' && 'Durbin-Watson Autocorrelation Output'}
                       {testResult.type === 'specification' && 'Ramsey RESET Specification Output'}
                     </h4>
                     <p className="text-xs text-stone-500 font-mono mt-1">Series: {testResult.variable} | N = {testResult.n}</p>
                   </div>
                   <div className={`px-3 py-1 rounded-full text-[10px] font-bold font-mono uppercase tracking-wider ${
-                    testResult.pValue === null || testResult.pValue >= 0.05 
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' 
+                    (testResult.reject !== undefined
+                      ? !testResult.reject
+                      : (testResult.pValue === null || testResult.pValue >= 0.05))
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-150'
                       : 'bg-rose-50 text-rose-700 border border-rose-150'
                   }`}>
                     {testResult.decision}
@@ -484,7 +520,7 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
                       </div>
                     </>
                   )}
-                  {testResult.type === 'stationarity' && (
+                  {(testResult.type === 'stationarity' || testResult.type === 'phillips' || testResult.type === 'kpss') && (
                     <>
                       <div className="bg-white border border-stone-100 p-4 rounded-xl text-center space-y-1">
                         <span className="text-[10px] font-mono font-bold uppercase text-stone-400">1% Critical Value</span>
@@ -532,6 +568,16 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
                       testResult.stat < testResult.criticalValues['5%']
                         ? `The Augmented Dickey-Fuller statistic of ${testResult.stat.toFixed(2)} is less than the 5% critical value of ${testResult.criticalValues['5%']}. We reject the null hypothesis of a unit root; the series is stationary. You may estimate models with this series without fear of spurious regression.`
                         : `The Augmented Dickey-Fuller statistic of ${testResult.stat.toFixed(2)} is greater than the 5% critical value of ${testResult.criticalValues['5%']}. We fail to reject the null hypothesis of a unit root; the series is non-stationary. Regressing this variable against another non-stationary series might yield spurious coefficients with inflated R-squared. Consider differencing the variable first.`
+                    )}
+                    {testResult.type === 'phillips' && (
+                      testResult.stat < testResult.criticalValues['5%']
+                        ? `The Phillips-Perron statistic of ${testResult.stat.toFixed(2)} is below the 5% critical value of ${testResult.criticalValues['5%']}. We reject the unit-root null; the series is stationary. Unlike ADF, the PP test corrects for autocorrelation and heteroskedasticity non-parametrically rather than by adding lagged differences.`
+                        : `The Phillips-Perron statistic of ${testResult.stat.toFixed(2)} exceeds the 5% critical value of ${testResult.criticalValues['5%']}. We fail to reject the unit-root null; the series appears non-stationary. Consider differencing before using it in a levels regression.`
+                    )}
+                    {testResult.type === 'kpss' && (
+                      testResult.reject
+                        ? `The KPSS statistic of ${testResult.stat.toFixed(3)} exceeds the 5% critical value of ${testResult.criticalValues['5%']}. Note the null is reversed for KPSS: we reject stationarity, so the series is non-stationary. When ADF/PP fail to reject a unit root AND KPSS rejects stationarity, the evidence for non-stationarity is strong.`
+                        : `The KPSS statistic of ${testResult.stat.toFixed(3)} is below the 5% critical value of ${testResult.criticalValues['5%']}. We fail to reject the null of stationarity, so the series is consistent with being (trend-)stationary. KPSS is a useful confirmatory complement to ADF/PP because its null hypothesis is the opposite.`
                     )}
                     {testResult.type === 'autocorrelation' && (
                       testResult.stat < 1.5

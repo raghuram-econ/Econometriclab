@@ -14,7 +14,9 @@ services:
     name: econometrics-lab
     runtime: node
     plan: free
-    buildCommand: npm install && node ./node_modules/vite/bin/vite.js build
+    branch: main
+    autoDeploy: true
+    buildCommand: npm install && node --max-old-space-size=2048 ./node_modules/vite/bin/vite.js build
     startCommand: node ./node_modules/tsx/dist/cli.mjs server.ts
     healthCheckPath: /api/health
     envVars:
@@ -35,6 +37,8 @@ services:
     name: econometrics-lab-python
     runtime: python
     plan: free
+    branch: main
+    autoDeploy: true
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     envVars:
