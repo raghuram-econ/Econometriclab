@@ -12,6 +12,8 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { runOLS } from '../../lib/econometrics/ols';
+import { runSharpRDD } from '../../lib/econometrics/rdd';
+import { runGMM } from '../../services/apiClient';
 import { Dataset, AnalysisResult } from '../../types';
 import { cn, fmt, fmtP, stars } from '../../lib/utils';
 import jStat from 'jstat';
@@ -22,7 +24,7 @@ interface CausalLabProps {
   onRunComplete: (r: AnalysisResult) => void;
 }
 
-type TabType = 'did' | 'iv' | 'rd';
+type TabType = 'did' | 'iv' | 'rd' | 'gmm';
 
 export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [activeTab, setActiveTab] = useState<TabType>('did');
@@ -48,6 +50,13 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [rdBandwidth, setRdBandwidth] = useState('1');
   const [rdPolynomial, setRdPolynomial] = useState<'linear' | 'quadratic'>('linear');
   const [rdResult, setRdResult] = useState<any | null>(null);
+
+  // Dynamic Panel GMM State (Arellano-Bond, Python backend)
+  const [gmmEntity, setGmmEntity] = useState('');
+  const [gmmTime, setGmmTime] = useState('');
+  const [gmmDep, setGmmDep] = useState('');
+  const [gmmInstruments, setGmmInstruments] = useState<string[]>([]);
+  const [gmmResult, setGmmResult] = useState<any | null>(null);
 
   const [isEstimating, setIsEstimating] = useState(false);
   const [estimationError, setEstimationError] = useState<string | null>(null);
@@ -328,8 +337,17 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
       // Precise p-value using standard normal CDF
       const rdP = 2 * (1 - jStat.normal.cdf(Math.abs(rdT), 0, 1));
 
+      // Certified local-linear RDD (pooled treatment-interaction regression,
+      // Silverman bandwidth selector) via the tested estimator, shown as a
+      // cross-check against the inline separate-sides estimate above.
+      let certified: any = null;
+      try {
+        certified = runSharpRDD(data, rdOutcome, rdRunning, cutoff);
+      } catch (_e) { certified = null; }
+
       const formattedResult = {
         rdEstimate,
+        certified,
         rdSE,
         rdT,
         rdP,
@@ -355,6 +373,42 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
         type: 'generic',
         specification: formattedResult.specification,
         results: formattedResult
+      });
+    } catch (err: any) {
+      setEstimationError(`Estimation error: ${err.message || err}`);
+    } finally {
+      setIsEstimating(false);
+    }
+  };
+
+  // --- DYNAMIC PANEL GMM (Arellano-Bond, Python backend) ---
+  const handleRunGMM = async () => {
+    if (!gmmEntity || !gmmTime || !gmmDep) return;
+    setIsEstimating(true);
+    setEstimationError(null);
+    try {
+      // Column order sent to the backend: [entity, time, dep, ...controls].
+      // The endpoint takes column *indices* (as strings) into this matrix.
+      const cols = [gmmEntity, gmmTime, gmmDep, ...gmmInstruments];
+      const rows = (dataset.data || []).filter(r =>
+        cols.every(c => r[c] !== undefined && r[c] !== null && !isNaN(parseFloat(r[c])))
+      );
+      if (rows.length < gmmInstruments.length + 8) {
+        throw new Error('Too few complete numeric rows for dynamic GMM. Entity, time and the dependent variable must all be numeric, with at least 3 periods per entity.');
+      }
+      const data = rows.map(r => cols.map(c => parseFloat(r[c])));
+      const res = await runGMM({
+        data,
+        entityVar: '0',
+        timeVar: '1',
+        depVar: '2',
+        instruments: gmmInstruments.map((_, i) => String(3 + i)),
+      });
+      setGmmResult({ ...res, gmmDep, gmmEntity, gmmTime });
+      onRunComplete({
+        type: 'generic',
+        specification: `Dynamic Panel GMM (Arellano-Bond): d.${gmmDep} on d.L1.${gmmDep}` + (gmmInstruments.length ? ` + ${gmmInstruments.join(' + ')}` : ''),
+        results: res
       });
     } catch (err: any) {
       setEstimationError(`Estimation error: ${err.message || err}`);
@@ -399,6 +453,15 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
             )}
           >
             Regression Discontinuity
+          </button>
+          <button
+            onClick={() => setActiveTab('gmm')}
+            className={cn(
+              "px-4 py-2 text-xs font-bold uppercase tracking-widest rounded-lg transition-all",
+              activeTab === 'gmm' ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
+            )}
+          >
+            Dynamic GMM
           </button>
         </div>
       </div>
@@ -924,6 +987,35 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                   </div>
                 </div>
 
+                {/* Certified local-linear cross-check (runSharpRDD) */}
+                {rdResult.certified && (
+                  <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-3">
+                    <h4 className="text-xs font-bold text-stone-800 uppercase tracking-wider flex items-center gap-2">
+                      <Target className="w-4 h-4 text-stone-600" />
+                      Certified Local-Linear Estimate (auto bandwidth)
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                        <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Treatment Effect</span>
+                        <span className="text-lg font-serif font-bold text-[#1B2E41]">{fmt(rdResult.certified.rddEstimate)}</span>
+                      </div>
+                      <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                        <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Std Error</span>
+                        <span className="text-lg font-serif text-stone-800">{fmt(rdResult.certified.rddStdError)}</span>
+                      </div>
+                      <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                        <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">p-value</span>
+                        <span className="text-lg font-serif text-stone-800">{fmtP(rdResult.certified.rddPValue)}</span>
+                      </div>
+                      <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                        <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Bandwidth ({rdResult.certified.bandwidthSelector})</span>
+                        <span className="text-lg font-serif text-stone-800">{fmt(rdResult.certified.bandwidth)}</span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-stone-400 leading-normal italic">{rdResult.certified.methodNote}</p>
+                  </div>
+                )}
+
                 {/* Interpretation */}
                 <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-3">
                   <h4 className="text-xs font-bold text-stone-800 uppercase tracking-wider flex items-center gap-2">
@@ -937,6 +1029,128 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                   <p className="text-[11px] text-stone-400 leading-normal italic">
                     Below Boundary Prediction: {fmt(rdResult.predBelow)} (N = {rdResult.belowCount}) | Above Boundary Prediction: {fmt(rdResult.predAbove)} (N = {rdResult.aboveCount})
                   </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* GMM PANEL */}
+      {activeTab === 'gmm' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          <div className="lg:col-span-4 p-6 bg-white border border-stone-200 rounded-2xl shadow-sm space-y-4">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 flex items-center gap-2">
+              <GitCommit className="w-4 h-4 text-stone-600" />
+              Dynamic Panel GMM
+            </h3>
+            <p className="text-[10px] text-stone-400 leading-relaxed">
+              Arellano-Bond: the model is first-differenced and the lagged dependent variable is instrumented with deeper lags. Entity and Time must be numeric columns. Runs on the Python (linearmodels) engine.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Entity (Panel ID)</label>
+                <select value={gmmEntity} onChange={e => setGmmEntity(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="">Select entity column...</option>
+                  {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Time Period</label>
+                <select value={gmmTime} onChange={e => setGmmTime(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="">Select time column...</option>
+                  {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Dependent Variable (Y)</label>
+                <select value={gmmDep} onChange={e => setGmmDep(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="">Select variable...</option>
+                  {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Exogenous Controls (optional)</label>
+                <div className="max-h-28 overflow-y-auto border border-stone-200 rounded-lg p-2 space-y-1 bg-stone-50">
+                  {numericVars.filter(v => v.name !== gmmEntity && v.name !== gmmTime && v.name !== gmmDep).map(v => (
+                    <label key={v.name} className="flex items-center gap-2 text-xs text-stone-700">
+                      <input type="checkbox" checked={gmmInstruments.includes(v.name)} onChange={e => {
+                        if (e.target.checked) setGmmInstruments([...gmmInstruments, v.name]);
+                        else setGmmInstruments(gmmInstruments.filter(c => c !== v.name));
+                      }} className="rounded text-[#1B2E41] focus:ring-[#1B2E41]" />
+                      {v.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button onClick={handleRunGMM} disabled={!gmmEntity || !gmmTime || !gmmDep || isEstimating}
+                className="w-full py-2.5 bg-[#1B2E41] hover:bg-[#243D54] disabled:bg-stone-300 text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2">
+                {isEstimating ? (
+                  <div className="flex items-center gap-2"><div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" /><span>Estimating...</span></div>
+                ) : (<>Run Dynamic GMM <ArrowRight className="w-4 h-4" /></>)}
+              </button>
+              {estimationError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-[10px] font-medium flex items-start gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+                  <div><span className="font-bold block mb-0.5 uppercase tracking-widest text-[9px] text-red-800">Estimation Failed</span>{estimationError}</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="lg:col-span-8 space-y-6">
+            {!gmmResult ? (
+              <div className="p-12 text-center bg-stone-50 border border-stone-200 rounded-2xl h-full flex flex-col justify-center items-center">
+                <GitCommit className="w-10 h-10 text-stone-300 mb-2" />
+                <h4 className="text-sm font-bold text-stone-600">No GMM Model Run</h4>
+                <p className="text-xs text-stone-400 font-serif italic max-w-sm mt-1">Select entity, time, and a dependent variable to fit an Arellano-Bond dynamic panel model.</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Observations</span>
+                    <span className="text-xl font-serif font-bold text-stone-800">{gmmResult.n_obs ?? '—'}</span>
+                  </div>
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Hansen J</span>
+                    <span className="text-xl font-serif font-bold text-stone-800">{typeof gmmResult.j_stat === 'number' ? fmt(gmmResult.j_stat) : '—'}</span>
+                  </div>
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">J p-value</span>
+                    <span className="text-xl font-serif font-bold text-stone-800">{typeof gmmResult.j_pval === 'number' ? fmtP(gmmResult.j_pval) : '—'}</span>
+                  </div>
+                </div>
+                {gmmResult.j_note && (
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl flex items-start gap-2.5 text-stone-600">
+                    <Info className="w-4 h-4 text-stone-500 mt-0.5 shrink-0" />
+                    <p className="text-xs font-serif italic leading-relaxed">{gmmResult.j_note}</p>
+                  </div>
+                )}
+                <div className="bg-white border border-stone-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4">Dynamic GMM Coefficient Matrix</h3>
+                  <div className="overflow-x-auto">
+                    <table className="journal-table">
+                      <thead><tr><th>Variable</th><th>Estimate</th><th>Std Error</th><th>t-stat</th><th>p-value</th><th>Significance</th></tr></thead>
+                      <tbody>
+                        {(gmmResult.coefficients || []).map((coef: any) => {
+                          const s = stars(coef.pValue);
+                          return (
+                            <tr key={coef.variable}>
+                              <td className="font-mono text-xs">{coef.variable}</td>
+                              <td className="text-right">{fmt(coef.estimate)}</td>
+                              <td className="text-right">{fmt(coef.stdError)}</td>
+                              <td className="text-right">{fmt(coef.tStat)}</td>
+                              <td className="text-right">{fmtP(coef.pValue)}</td>
+                              <td className="text-center font-bold"><span className={cn(s === '***' ? "text-red-700" : s === '**' ? "text-amber-700" : "text-stone-400")}>{s || 'n.s.'}</span></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}

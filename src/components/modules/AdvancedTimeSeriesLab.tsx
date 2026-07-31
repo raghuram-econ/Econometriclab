@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { Dataset } from '../../types';
 import { generateMasterDataset } from '../../lib/dataGenerators';
-import { runJohansen } from '../../services/apiClient';
+import { runJohansen, runCointegration } from '../../services/apiClient';
 import { runGARCH, runGrangerCausality } from '../../lib/econometrics/arima';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
 import { ResponsiveContainer, LineChart as RecLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
@@ -71,6 +71,8 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
   const [cointResults, setCointResults] = useState<any | null>(null);
   const [isCointRunning, setIsCointRunning] = useState<boolean>(false);
   const [cointError, setCointError] = useState<string | null>(null);
+  const [engleResults, setEngleResults] = useState<any | null>(null);
+  const [isEngleRunning, setIsEngleRunning] = useState<boolean>(false);
 
   React.useEffect(() => {
     if (numericVariables.length > 1) {
@@ -129,6 +131,30 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
       setCointError(err.message || "Failed to run Johansen Cointegration test.");
     } finally {
       setIsCointRunning(false);
+    }
+  };
+
+  const handleRunEngle = async () => {
+    if (!activeDataset || cointVars.length < 2) {
+      setCointError("Select at least 2 variables for the Engle-Granger test.");
+      return;
+    }
+    setIsEngleRunning(true);
+    setCointError(null);
+    try {
+      const validRows = activeDataset.data.filter((row: any) =>
+        cointVars.every(v => { const val = parseFloat(row[v]); return !isNaN(val) && isFinite(val); })
+      );
+      if (validRows.length < 15) {
+        throw new Error("At least 15 valid observations are required for the Engle-Granger test.");
+      }
+      const series = validRows.map((row: any) => cointVars.map(v => parseFloat(row[v])));
+      const res = await runCointegration({ series, seriesNames: cointVars });
+      setEngleResults(res);
+    } catch (err: any) {
+      setCointError(err.message || "Failed to run Engle-Granger cointegration test.");
+    } finally {
+      setIsEngleRunning(false);
     }
   };
 
@@ -752,11 +778,49 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
                       </>
                     )}
                   </button>
+
+                  <button
+                    onClick={handleRunEngle}
+                    disabled={isEngleRunning || cointVars.length < 2}
+                    className="w-full py-3 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-bold font-mono tracking-wider uppercase transition shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isEngleRunning ? (
+                      <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Testing...</>
+                    ) : (
+                      <>Engle-Granger (2-Step) Test</>
+                    )}
+                  </button>
                 </div>
               </div>
 
               {/* Output / Results Panel */}
               <div className="lg:col-span-8 space-y-6">
+                {engleResults && (
+                  <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-3">
+                    <h4 className="text-sm font-bold text-stone-800">Engle-Granger 2-Step Cointegration ({cointVars[0]} vs. rest)</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="p-3 bg-stone-50 border border-stone-100 rounded-xl text-center">
+                        <span className="text-[10px] font-mono uppercase text-stone-400 block">Test Statistic</span>
+                        <span className="text-lg font-mono font-bold text-stone-800">{typeof engleResults.t_stat === 'number' ? engleResults.t_stat.toFixed(4) : '—'}</span>
+                      </div>
+                      <div className="p-3 bg-stone-50 border border-stone-100 rounded-xl text-center">
+                        <span className="text-[10px] font-mono uppercase text-stone-400 block">p-value</span>
+                        <span className="text-lg font-mono font-bold text-stone-800">{typeof engleResults.p_value === 'number' ? engleResults.p_value.toFixed(4) : '—'}</span>
+                      </div>
+                      {Array.isArray(engleResults.crit_values) && engleResults.crit_values.map((cv: number, i: number) => (
+                        <div key={i} className="p-3 bg-stone-50 border border-stone-100 rounded-xl text-center">
+                          <span className="text-[10px] font-mono uppercase text-stone-400 block">{['1%', '5%', '10%'][i] || 'CV'}</span>
+                          <span className="text-lg font-mono font-bold text-stone-800">{typeof cv === 'number' ? cv.toFixed(3) : '—'}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-stone-500 font-serif italic">
+                      {typeof engleResults.p_value === 'number' && engleResults.p_value < 0.05
+                        ? `p < 0.05: reject the null of no cointegration — ${cointVars.join(', ')} share a stable long-run relationship.`
+                        : `p >= 0.05: fail to reject the null of no cointegration — no evidence of a long-run equilibrium among these series.`}
+                    </p>
+                  </div>
+                )}
                 {!cointResults && !isCointRunning && !cointError ? (
                   <div className="bg-white border border-stone-200 rounded-2xl p-8 shadow-sm space-y-6">
                     <div className="flex items-center gap-3">
