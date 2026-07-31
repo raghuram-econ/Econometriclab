@@ -835,6 +835,138 @@ def run_cox(req: CoxRequest):
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+
+# ── Research-grade routing for methods the browser engine only approximates ──
+
+class GARCHRequest(BaseModel):
+    series: List[float]
+    p: int = 1
+    q: int = 1
+
+@app.post("/python/garch")
+def run_garch(req: GARCHRequest):
+    """GARCH(p,q) by maximum likelihood via the `arch` package (the rugarch equivalent)."""
+    try:
+        import numpy as np
+        from arch import arch_model
+        y = np.asarray(req.series, dtype=float)
+        y = y[np.isfinite(y)]
+        if len(y) < 20:
+            raise HTTPException(status_code=422, detail="Need at least 20 observations for GARCH estimation.")
+        res = arch_model(y, mean='Constant', vol='GARCH', p=req.p, q=req.q, dist='normal').fit(disp='off')
+        pr = res.params.to_dict()
+        alpha = pr.get('alpha[1]')
+        beta = pr.get('beta[1]')
+        return {
+            "omega": safe_float(pr.get('omega')),
+            "alpha": safe_float(alpha),
+            "beta": safe_float(beta),
+            "persistence": safe_float((alpha or 0) + (beta or 0)),
+            "mu": safe_float(pr.get('mu')),
+            "logLik": safe_float(res.loglikelihood),
+            "aic": safe_float(res.aic),
+            "bic": safe_float(res.bic),
+            "conditionalVolatility": [safe_float(v) for v in res.conditional_volatility.tolist()],
+            "nobs": int(res.nobs),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class UnitRootRequest(BaseModel):
+    series: List[float]
+    test: str = "adf"        # 'adf' | 'kpss' | 'pp'
+    regression: str = "c"    # 'c' constant, 'ct' constant+trend, 'n' none
+
+@app.post("/python/unit-root")
+def run_unit_root(req: UnitRootRequest):
+    """ADF/KPSS via statsmodels, Phillips-Perron via arch — research-grade unit-root tests."""
+    try:
+        import numpy as np
+        y = np.asarray(req.series, dtype=float)
+        y = y[np.isfinite(y)]
+        if len(y) < 12:
+            raise HTTPException(status_code=422, detail="Need at least 12 observations for a unit-root test.")
+        test = (req.test or "adf").lower()
+        reg = req.regression if req.regression in ("c", "ct", "n") else "c"
+        if test == "adf":
+            from statsmodels.tsa.stattools import adfuller
+            stat, pval, lags, nobs, crit, _ = adfuller(y, regression=reg, autolag="AIC")
+            return {"test": "ADF", "stat": safe_float(stat), "pValue": safe_float(pval),
+                    "critValues": {k: safe_float(v) for k, v in crit.items()},
+                    "lags": int(lags), "nobs": int(nobs),
+                    "nullHypothesis": "Unit root (non-stationary)"}
+        if test == "kpss":
+            from statsmodels.tsa.stattools import kpss
+            kreg = "ct" if reg == "ct" else "c"
+            stat, pval, lags, crit = kpss(y, regression=kreg, nlags="auto")
+            return {"test": "KPSS", "stat": safe_float(stat), "pValue": safe_float(pval),
+                    "critValues": {k: safe_float(v) for k, v in crit.items()},
+                    "lags": int(lags), "nobs": int(len(y)),
+                    "nullHypothesis": "Stationary"}
+        if test == "pp":
+            from arch.unitroot import PhillipsPerron
+            trend = "ct" if reg == "ct" else ("n" if reg == "n" else "c")
+            pp = PhillipsPerron(y, trend=trend)
+            return {"test": "PP", "stat": safe_float(pp.stat), "pValue": safe_float(pp.pvalue),
+                    "critValues": {k: safe_float(v) for k, v in pp.critical_values.items()},
+                    "lags": int(pp.lags), "nobs": int(pp.nobs),
+                    "nullHypothesis": "Unit root (non-stationary)"}
+        raise HTTPException(status_code=422, detail=f"Unknown test '{req.test}'. Use adf, kpss, or pp.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class RDDRequest(BaseModel):
+    y: List[float]
+    x: List[float]
+    cutoff: float = 0.0
+
+@app.post("/python/rdd")
+def run_rdd(req: RDDRequest):
+    """Sharp RDD via `rdrobust` (MSE-optimal bandwidth + bias correction), matching R's rdrobust."""
+    try:
+        import numpy as np
+        from rdrobust import rdrobust
+        y = np.asarray(req.y, dtype=float)
+        x = np.asarray(req.x, dtype=float)
+        mask = np.isfinite(y) & np.isfinite(x)
+        y, x = y[mask], x[mask]
+        if len(y) < 20:
+            raise HTTPException(status_code=422, detail="Need at least 20 complete observations for rdrobust.")
+        out = rdrobust(y=y, x=x, c=req.cutoff)
+
+        # rdrobust returns coef/se/pv/ci as DataFrames indexed by
+        # ['Conventional','Bias-Corrected','Robust']; surface the Robust row.
+        def cell(df, row_label, col=0):
+            try:
+                return safe_float(df.loc[row_label].iloc[col])
+            except Exception:
+                try:
+                    return safe_float(df.iloc[-1, col])
+                except Exception:
+                    return None
+
+        return {
+            "coef": cell(out.coef, "Conventional"),
+            "seRobust": cell(out.se, "Robust"),
+            "pValueRobust": cell(out.pv, "Robust"),
+            "ciLow": cell(out.ci, "Robust", 0),
+            "ciHigh": cell(out.ci, "Robust", 1),
+            "bandwidth": safe_float(getattr(out, "bws", None).iloc[0, 0]) if getattr(out, "bws", None) is not None else None,
+            "cutoff": req.cutoff,
+            "nUsed": int(len(y)),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 class ARIMARequest(BaseModel):
     series: List[float]
     p: int

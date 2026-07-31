@@ -358,6 +358,9 @@ async function startServer() {
     "/api/python/heckman": "/python/heckman",
     "/api/python/johansen": "/python/johansen",
     "/api/python/survey-ols": "/python/survey-ols",
+    "/api/python/garch": "/python/garch",
+    "/api/python/unit-root": "/python/unit-root",
+    "/api/python/rdd": "/python/rdd",
   };
 
   app.post(Object.keys(PYTHON_JSON_ROUTES), async (req, res) => {

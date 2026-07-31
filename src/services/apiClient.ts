@@ -166,6 +166,32 @@ export async function runCoxPH(payload: {
   return callBackendAPI('/api/python/cox', payload);
 }
 
+// Research-grade routing for methods the browser engine only approximates.
+// GARCH via `arch`, unit-root (ADF/KPSS/PP) via statsmodels + arch, RDD via `rdrobust`.
+export async function runGARCHPy(payload: {
+  series: number[];
+  p?: number;
+  q?: number;
+}): Promise<any> {
+  return callBackendAPI('/api/python/garch', payload);
+}
+
+export async function runUnitRoot(payload: {
+  series: number[];
+  test: 'adf' | 'kpss' | 'pp';
+  regression?: 'c' | 'ct' | 'n';
+}): Promise<any> {
+  return callBackendAPI('/api/python/unit-root', payload);
+}
+
+export async function runRDDPy(payload: {
+  y: number[];
+  x: number[];
+  cutoff?: number;
+}): Promise<any> {
+  return callBackendAPI('/api/python/rdd', payload);
+}
+
 // Python Backend Full ARIMA (Kalman-filter MLE via statsmodels, with MA terms
 // and real forecast standard errors -- the benchmark-grade path; the browser
 // engine is a lightweight CSS-based preview, see AdvancedTimeSeriesLab).
