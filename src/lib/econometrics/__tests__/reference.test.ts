@@ -16,7 +16,8 @@ import { estimateModel } from '../estimators';
 import { runTobitMLE } from '../tobit';
 import { approximateADFPValue, runKPSSTest, runPhillipsPerronTest, runVAR, runGARCH, runARIMA } from '../arima';
 import { runPoissonMLE, runNegBinomialMLE } from '../count';
-import { ridgeRegression, lassoRegression } from '../penalized';
+import { ridgeRegression, lassoRegression, elasticNet } from '../penalized';
+import { matchNearestNeighborATT } from '../../../components/modules/TreatmentEffectsLab';
 import { MROZ_WOOLDRIDGE } from '../tests/fixtures/mroz-wooldridge';
 import { MROZ_DATA } from '../tests/fixtures/mroz';
 
@@ -422,6 +423,69 @@ describe('LASSO regression against sklearn (coordinate descent)', () => {
       expect(c).toBeDefined();
       expect(relErr(c.estimate, expected)).toBeLessThan(LASSO_TOL);
     }
+  });
+});
+
+describe('Elastic Net against sklearn (coordinate descent)', () => {
+  // sklearn ElasticNet(alpha=0.3, l1_ratio=0.5) on the same fixture; the
+  // browser engine's (lambda, alpha=mixing) maps directly to sklearn's
+  // (alpha, l1_ratio). Same coordinate-descent caveat as LASSO above: exact
+  // variable selection expected, coefficients within a few percent -- except
+  // x4, whose true coefficient is itself close to zero, so its *relative*
+  // error is naturally noisy even though the *absolute* difference is tiny.
+  // Computed live, 2026-08-01.
+  const data = loadCSVRows('penalized_series.csv');
+  const xVars = ['x1', 'x2', 'x3', 'x4'];
+  const y = data.map(r => r.y);
+  const X = data.map(r => xVars.map(v => r[v]));
+  const REF: Record<string, number> = {
+    Intercept: 3.031798, x1: 1.60847867, x3: -1.1144153, x4: 0.06046565,
+  };
+
+  it('zeroes out the truly-zero coefficient (x2)', () => {
+    const res = elasticNet(X, y, 0.3, 0.5, xVars);
+    expect(coef(res, 'x2')?.estimate ?? 0).toBe(0);
+  });
+
+  it('matches Intercept, x1, x3 within coordinate-descent tolerance', () => {
+    const res = elasticNet(X, y, 0.3, 0.5, xVars);
+    for (const name of ['Intercept', 'x1', 'x3']) {
+      const c = coef(res, name);
+      expect(c).toBeDefined();
+      expect(relErr(c.estimate, REF[name]!)).toBeLessThan(0.02);
+    }
+  });
+
+  it('matches the near-zero x4 coefficient within an absolute tolerance', () => {
+    const res = elasticNet(X, y, 0.3, 0.5, xVars);
+    const c = coef(res, 'x4');
+    expect(c).toBeDefined();
+    expect(Math.abs(c.estimate - REF.x4!)).toBeLessThan(0.02);
+  });
+});
+
+describe('Nearest-neighbor propensity-score matching (1-NN, with replacement)', () => {
+  // Independent Python/numpy implementation of the identical algorithm
+  // (nearest propensity-score match per treated unit, ties broken by first
+  // occurrence via argmin) on the same simulated confounded-treatment data.
+  // Computed live, 2026-08-01. This is deterministic nearest-neighbor
+  // search, not an MLE/optimizer, so exact agreement (not just "close") is
+  // the right bar.
+  const data = loadCSVRows('psm_series.csv');
+  const pScores = data.map(r => r.pscore);
+  const T = data.map(r => r.T);
+  const Y = data.map(r => r.Y);
+
+  it('matches the reference ATT and unmatched difference exactly', () => {
+    const res = matchNearestNeighborATT(pScores, T, Y);
+    expect(relErr(res.att, 3.403643)).toBeLessThan(COEF_TOL);
+    expect(relErr(res.unmatchedDiff, 6.563627)).toBeLessThan(COEF_TOL);
+  });
+
+  it('matches every individual matched-control index exactly', () => {
+    const res = matchNearestNeighborATT(pScores, T, Y);
+    const REF_FIRST10 = [24, 7, 24, 50, 24, 24, 24, 24, 27, 24];
+    expect(res.matchedControlIdx.slice(0, 10)).toEqual(REF_FIRST10);
   });
 });
 

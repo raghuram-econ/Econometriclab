@@ -23,6 +23,59 @@ interface TreatmentEffectsLabProps {
   onRunComplete?: (results: any, spec: string) => void;
 }
 
+/**
+ * 1-to-1 nearest-neighbor propensity-score matching, with replacement.
+ * For each treated unit, matches the control unit with the closest
+ * propensity score (ties broken by first-found); ATT is the mean outcome
+ * gap between treated units and their matched controls. Same algorithm as
+ * R's MatchIt::matchit(method="nearest", replace=TRUE, distance=<given
+ * scores>) -- extracted as a pure function so it can be tested directly.
+ */
+export function matchNearestNeighborATT(
+  pScores: number[],
+  T: number[],
+  Y: number[]
+): { att: number; unmatchedDiff: number; matchedControlIdx: number[] } {
+  const treatedIdx: number[] = [];
+  const controlIdx: number[] = [];
+  for (let i = 0; i < T.length; i++) {
+    if (T[i] === 1) treatedIdx.push(i);
+    else controlIdx.push(i);
+  }
+  if (treatedIdx.length === 0 || controlIdx.length === 0) {
+    throw new Error('Causal matching requires at least some Treated (1) and Control (0) observations.');
+  }
+
+  const matchedControlIdx: number[] = [];
+  treatedIdx.forEach(tIdx => {
+    const tScore = pScores[tIdx] ?? 0;
+    let bestCtrlIdx = controlIdx[0] ?? 0;
+    let minDiff = Math.abs(tScore - (pScores[bestCtrlIdx] ?? 0));
+    controlIdx.forEach(cIdx => {
+      const diff = Math.abs(tScore - (pScores[cIdx] ?? 0));
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestCtrlIdx = cIdx;
+      }
+    });
+    matchedControlIdx.push(bestCtrlIdx);
+  });
+
+  const treatedYVals = treatedIdx.map(idx => Y[idx] ?? 0);
+  const matchedControlYVals = matchedControlIdx.map(idx => Y[idx] ?? 0);
+  const controlYVals = controlIdx.map(idx => Y[idx] ?? 0);
+
+  const meanTreated = treatedYVals.reduce((s, v) => s + v, 0) / treatedYVals.length;
+  const meanControl = controlYVals.reduce((s, v) => s + v, 0) / controlYVals.length;
+  const meanMatchedControl = matchedControlYVals.reduce((s, v) => s + v, 0) / matchedControlYVals.length;
+
+  return {
+    att: meanTreated - meanMatchedControl,
+    unmatchedDiff: meanTreated - meanControl,
+    matchedControlIdx,
+  };
+}
+
 // Simple Gradient Descent Logistic Regression solver for Propensity Scores
  /**
  * Propensity-score model.
@@ -157,35 +210,11 @@ export default function TreatmentEffectsLab({ dataset: propDataset, onRunComplet
           throw new Error("Causal matching requires at least some Treated (1) and Control (0) observations.");
         }
 
-        // 2. Perform Nearest-Neighbor Matching (with replacement)
-        // For each treated unit, find the control unit with closest propensity score
-        const matchedControlIdx: number[] = [];
-        treatedIdx.forEach(tIdx => {
-          const tScore = pScores[tIdx] ?? 0;
-          let bestCtrlIdx = controlIdx[0] ?? 0;
-          let minDiff = Math.abs(tScore - (pScores[bestCtrlIdx] ?? 0));
-
-          controlIdx.forEach(cIdx => {
-            const diff = Math.abs(tScore - (pScores[cIdx] ?? 0));
-            if (diff < minDiff) {
-              minDiff = diff;
-              bestCtrlIdx = cIdx;
-            }
-          });
-          matchedControlIdx.push(bestCtrlIdx);
-        });
-
-        // 3. Compute ATT & Simple mean differences
+        // 2-3. Nearest-neighbor matching (with replacement) + ATT, via the
+        // shared, independently-tested matchNearestNeighborATT function.
+        const { att, unmatchedDiff, matchedControlIdx } = matchNearestNeighborATT(pScores, T, Y);
         const treatedYVals: number[] = treatedIdx.map(idx => Y[idx] ?? 0);
-        const matchedControlYVals: number[] = matchedControlIdx.map(idx => Y[idx] ?? 0);
-        const controlYVals: number[] = controlIdx.map(idx => Y[idx] ?? 0);
-
         const meanTreated = treatedYVals.reduce((sum: number, v: number) => sum + v, 0) / treatedYVals.length;
-        const meanControl = controlYVals.reduce((sum: number, v: number) => sum + v, 0) / controlYVals.length;
-        const meanMatchedControl = matchedControlYVals.reduce((sum: number, v: number) => sum + v, 0) / matchedControlYVals.length;
-
-        const unmatchedDiff = meanTreated - meanControl;
-        const att = meanTreated - meanMatchedControl;
 
         // Estimate matching standard error (approximate analytical SE)
         const attVariance = treatedYVals.reduce((sum: number, v: number) => sum + (v - meanTreated - att) ** 2, 0) / (treatedYVals.length * treatedYVals.length);
