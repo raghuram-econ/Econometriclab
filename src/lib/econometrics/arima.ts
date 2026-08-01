@@ -4,9 +4,17 @@ import { runOLS } from './ols';
 
 /**
  * Simplified ARIMA implementation
- * Supports differencing (d) and Auto-regression (p)
- * Moving Average (q) is approximated using residual feedback if needed, 
- * but for this lab version we focus on AR(p) + Differencing.
+ * Supports differencing (d) and Auto-regression (p) only.
+ *
+ * MA(q) is deliberately unsupported here (q must be 0). An earlier version
+ * accepted q up to 2 and fit AR via plain OLS, then bolted a conditional-sum-
+ * of-squares MA correction onto the *residuals* afterward -- the AR
+ * coefficient was never re-estimated jointly with the MA term, so it stayed
+ * pinned near the misspecified AR-only value instead of the true ARMA
+ * solution (verified: on a known ARMA(1,1) series, AR came out ~27% off and
+ * MA ~42% off vs statsmodels, while the pure-AR path matches to ~0.4%).
+ * Use the Python backend route /api/python/arima-full (real Kalman-filter
+ * MLE via statsmodels) for any model with q > 0.
  */
 export function runARIMA(
   series: number[],
@@ -19,11 +27,11 @@ export function runARIMA(
     throw new Error('Series too short for selected parameters.');
   }
 
-  // STAGE 1 — Minimum safe fix
-  if (q > 2) {
+  if (q > 0) {
     throw new Error(
-      `ARIMA MA(q) terms are not yet supported in the browser engine. ` +
-      `Set q=0, or use the Python backend route /api/python/arima-full for full ARIMA(${p},${d},${q}).`
+      `ARIMA MA(q) terms are not supported in the browser engine (its AR and MA ` +
+      `coefficients are not jointly estimated and can be substantially biased). ` +
+      `Set q=0, or use the Python backend route /api/python/arima-full for ARIMA(${p},${d},${q}).`
     );
   }
 

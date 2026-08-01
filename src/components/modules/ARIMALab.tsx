@@ -191,14 +191,7 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
         updateTeachingStep('Run projection');
       }
     } catch (err: any) {
-      if (err.message && err.message.includes('not yet supported')) {
-        setError(
-          `ARIMA with q > 2 is not supported in the browser engine. ` +
-          `Please set q to 1 or 2, or use the Python backend for full ARIMA(${p},${d},${q}).`
-        );
-      } else {
-        setError(err.message || 'An unexpected error occurred.');
-      }
+      setError(err.message || 'An unexpected error occurred.');
     }
   };
 
@@ -325,8 +318,8 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
               {error}
             </p>
             <p className="text-xs text-amber-600 mt-2 mb-2">
-              Set q = 1 or q = 2 to use the browser preview engine, or run this
-              specification on the Python backend below for full ARIMA support.
+              Set q = 0 to use the browser preview engine, or run this
+              specification on the Python backend below for full ARIMA(p,d,q) support.
             </p>
             <button
               disabled={isPythonRunning || !targetVar}
