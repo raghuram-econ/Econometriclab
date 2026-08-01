@@ -29,6 +29,7 @@ import {
 } from 'recharts';
 import { cn } from '../../lib/utils';
 import { Dataset } from '../../types';
+import { runPower } from '../../services/apiClient';
 
 interface PowerAnalysisLabProps {
   dataset: Dataset | null;
@@ -60,6 +61,15 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
   const [clusterSize, setClusterSize] = useState<number>(20); // m (obs per cluster)
   const [icc, setIcc] = useState<number>(0.05); // rho (Intraclass Correlation Coefficient)
   const [numClusters, setNumClusters] = useState<number>(30); // Total clusters (C)
+
+  // Research-grade cluster-interaction simulation (Python backend)
+  const [pDisadv, setPDisadv] = useState<number>(0.5);
+  const [effMain, setEffMain] = useState<number>(0.25);
+  const [effInter, setEffInter] = useState<number>(0.20);
+  const [baselineR2, setBaselineR2] = useState<number>(0.30);
+  const [pyResult, setPyResult] = useState<any | null>(null);
+  const [pyRunning, setPyRunning] = useState<boolean>(false);
+  const [pyError, setPyError] = useState<string | null>(null);
 
   // Auto-populate from active dataset if available
   const handleAutoPopulate = () => {
@@ -98,6 +108,30 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
         setClusterSize(Math.max(5, Math.floor(dataset.rowCount / 15)));
         setNumClusters(15);
       }
+    }
+  };
+
+  const handleRunPySim = async () => {
+    setPyRunning(true);
+    setPyError(null);
+    try {
+      const res = await runPower({
+        design: 'cluster-interaction',
+        alpha,
+        nClusters: numClusters,
+        clusterSize,
+        icc,
+        pDisadv,
+        effectMain: effMain,
+        effectInteraction: effInter,
+        rSquared: baselineR2,
+        nSims: 1000,
+      });
+      setPyResult(res);
+    } catch (err: any) {
+      setPyError(err?.message || 'Simulation failed. Ensure the backend is running and you are signed in.');
+    } finally {
+      setPyRunning(false);
     }
   };
 
@@ -866,6 +900,51 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
 
         </div>
       </div>
+
+      {mode === 'cluster_did' && (
+        <div className="card-premium p-6 bg-white border-slate-100 shadow-sm space-y-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-purple-500" />
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-900 font-mono">Research-Grade: Treatment &times; Moderator Interaction (Python simulation)</h4>
+            </div>
+            <span className="text-[9px] font-mono font-bold uppercase text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5">Monte-Carlo</span>
+          </div>
+          <p className="text-[11px] text-slate-500 font-serif italic">
+            Simulation-based power for the treatment &times; disadvantage interaction (the RQ3 estimand), using {numClusters} institutions &times; {clusterSize} students, ICC = {icc.toFixed(2)}. Matches/exceeds R's PowerUpR. Requires sign-in.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { label: 'Disadv. share', value: pDisadv, set: setPDisadv, min: 0.1, max: 0.9, step: 0.05 },
+              { label: 'Avg effect (SD)', value: effMain, set: setEffMain, min: 0.05, max: 0.8, step: 0.05 },
+              { label: 'Interaction (SD)', value: effInter, set: setEffInter, min: 0.0, max: 0.6, step: 0.05 },
+              { label: 'Baseline R²', value: baselineR2, set: setBaselineR2, min: 0.0, max: 0.8, step: 0.05 },
+            ].map(f => (
+              <div key={f.label} className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-wider text-slate-400 font-mono">{f.label}: {f.value.toFixed(2)}</label>
+                <input type="range" min={f.min} max={f.max} step={f.step} value={f.value} onChange={e => f.set(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-purple-600" />
+              </div>
+            ))}
+          </div>
+          <button onClick={handleRunPySim} disabled={pyRunning} className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold font-mono tracking-wider uppercase transition disabled:opacity-50">
+            {pyRunning ? 'Running 1,000 simulations…' : 'Run Power Simulation'}
+          </button>
+          {pyError && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-3">{pyError}</p>}
+          {pyResult && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl text-center">
+                <span className="text-[9px] font-mono uppercase text-slate-400 block">Power &mdash; Average effect (RQ2)</span>
+                <span className="text-2xl font-mono font-bold text-slate-900">{typeof pyResult.powerMain === 'number' ? Math.round(pyResult.powerMain * 100) : '—'}%</span>
+              </div>
+              <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl text-center">
+                <span className="text-[9px] font-mono uppercase text-emerald-600 block">Power &mdash; Interaction (RQ3)</span>
+                <span className="text-2xl font-mono font-bold text-emerald-800">{typeof pyResult.powerInteraction === 'number' ? Math.round(pyResult.powerInteraction * 100) : '—'}%</span>
+              </div>
+              <p className="col-span-2 text-[10px] text-slate-400 font-mono">{pyResult.method} &middot; N = {pyResult.nTotal}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
