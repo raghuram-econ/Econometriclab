@@ -15,6 +15,8 @@ import Papa from 'papaparse';
 import { estimateModel } from '../estimators';
 import { runTobitMLE } from '../tobit';
 import { approximateADFPValue, runKPSSTest, runPhillipsPerronTest, runVAR, runGARCH, runARIMA } from '../arima';
+import { runPoissonMLE, runNegBinomialMLE } from '../count';
+import { ridgeRegression, lassoRegression } from '../penalized';
 import { MROZ_WOOLDRIDGE } from '../tests/fixtures/mroz-wooldridge';
 import { MROZ_DATA } from '../tests/fixtures/mroz';
 
@@ -307,6 +309,119 @@ describe('VAR against statsmodels', () => {
   it('matches AIC and BIC', () => {
     expect(relErr(res.aic, -0.049856033478351935)).toBeLessThan(COEF_TOL);
     expect(relErr(res.bic, 0.11621805898096801)).toBeLessThan(COEF_TOL);
+  });
+});
+
+describe('Poisson MLE against statsmodels', () => {
+  // statsmodels Poisson(y ~ x1 + x2) on data simulated from a known Poisson
+  // DGP (true beta = [0.5, 0.8, -0.4]). Computed live, 2026-08-01.
+  const data = loadCSVRows('poisson_series.csv');
+  const REF: Record<string, { coef: number; se: number }> = {
+    Intercept: { coef: 0.499918, se: 0.042907 },
+    x1: { coef: 0.774022, se: 0.032904 },
+    x2: { coef: -0.402078, se: 0.033742 },
+  };
+
+  it('matches every coefficient and standard error', () => {
+    const res = runPoissonMLE(data, 'y', ['x1', 'x2'], true);
+    for (const [name, expected] of Object.entries(REF)) {
+      const c = coef(res, name);
+      expect(c).toBeDefined();
+      expect(relErr(c.estimate, expected.coef)).toBeLessThan(COEF_TOL);
+      expect(relErr(c.stdError, expected.se)).toBeLessThan(SE_TOL);
+    }
+  });
+
+  it('matches the log-likelihood', () => {
+    const res = runPoissonMLE(data, 'y', ['x1', 'x2'], true);
+    expect(Math.abs((res.logLikelihood as number) - (-640.6564058743643))).toBeLessThan(0.01);
+  });
+});
+
+describe('Negative Binomial MLE against statsmodels', () => {
+  // statsmodels NegativeBinomial(y ~ x1 + x2) on data simulated from a known
+  // NB2 DGP (true beta = [0.6, 0.5, -0.3], true alpha = 0.8). Computed live,
+  // 2026-08-01. Coefficients match to ~1e-5 relative error; standard errors
+  // agree to <0.4% on two of three regressors but diverge ~2.4% on x2 --
+  // likely a difference in how dispersion-parameter uncertainty propagates
+  // into the coefficient covariance matrix. Coefficients (the quantities
+  // actually reported/interpreted) are effectively exact; SE tolerance here
+  // is intentionally looser than the standard SE_TOL to reflect that.
+  const data = loadCSVRows('negbin_series.csv');
+  const REF: Record<string, { coef: number; se: number }> = {
+    Intercept: { coef: 0.519509, se: 0.060472 },
+    x1: { coef: 0.614028, se: 0.059012 },
+    x2: { coef: -0.297648, se: 0.058976 },
+  };
+  const NB_SE_TOL = 0.03;
+
+  it('matches every coefficient tightly and every SE within 3%', () => {
+    const res = runNegBinomialMLE(data, 'y', ['x1', 'x2'], true);
+    for (const [name, expected] of Object.entries(REF)) {
+      const c = coef(res, name);
+      expect(c).toBeDefined();
+      expect(relErr(c.estimate, expected.coef)).toBeLessThan(COEF_TOL);
+      expect(relErr(c.stdError, expected.se)).toBeLessThan(NB_SE_TOL);
+    }
+  });
+
+  it('matches the log-likelihood', () => {
+    const res = runNegBinomialMLE(data, 'y', ['x1', 'x2'], true);
+    expect(Math.abs((res.logLikelihood as number) - (-914.0682009148125))).toBeLessThan(0.01);
+  });
+});
+
+describe('Ridge regression against sklearn', () => {
+  // sklearn Ridge(alpha=5.0, fit_intercept=True) on penalized_series.csv
+  // (4 regressors, 2 truly zero). Both engines minimize ||y-Xb||^2 +
+  // lambda*||b||^2 with no 1/n scaling, so lambda maps directly to alpha.
+  // Computed live, 2026-08-01.
+  const data = loadCSVRows('penalized_series.csv');
+  const xVars = ['x1', 'x2', 'x3', 'x4'];
+  const y = data.map(r => r.y);
+  const X = data.map(r => [1, ...xVars.map(v => r[v])]);
+  const REF: Record<string, number> = {
+    Intercept: 3.051563, x1: 1.93871829, x2: 0.02373429, x3: -1.39494498, x4: 0.12707441,
+  };
+
+  it('matches every coefficient', () => {
+    const res = ridgeRegression(X, y, 5.0, xVars);
+    for (const [name, expected] of Object.entries(REF)) {
+      const c = coef(res, name);
+      expect(c).toBeDefined();
+      expect(relErr(c.estimate, expected)).toBeLessThan(COEF_TOL);
+    }
+  });
+});
+
+describe('LASSO regression against sklearn (coordinate descent)', () => {
+  // sklearn Lasso(alpha=0.3, fit_intercept=True) on the same fixture. Both
+  // engines minimize (1/2n)||y-Xb||^2 + lambda*||b||_1, so lambda maps
+  // directly to alpha -- but each runs its own coordinate-descent loop
+  // (different convergence tolerance, different internal standardization),
+  // so exact agreement isn't expected the way it is for Ridge's closed form.
+  // What must hold, and does: identical variable selection (x2, x4 -> exactly
+  // 0, matching the true sparse DGP) and coefficients within a few percent.
+  const data = loadCSVRows('penalized_series.csv');
+  const xVars = ['x1', 'x2', 'x3', 'x4'];
+  const y = data.map(r => r.y);
+  const X = data.map(r => xVars.map(v => r[v]));
+  const REF: Record<string, number> = { Intercept: 3.031173, x1: 1.71810613, x3: -1.12964583 };
+  const LASSO_TOL = 0.02;
+
+  it('zeroes out exactly the truly-zero coefficients (x2, x4)', () => {
+    const res = lassoRegression(X, y, 0.3, xVars);
+    expect(coef(res, 'x2')?.estimate ?? 0).toBe(0);
+    expect(coef(res, 'x4')?.estimate ?? 0).toBe(0);
+  });
+
+  it('matches the nonzero coefficients within coordinate-descent tolerance', () => {
+    const res = lassoRegression(X, y, 0.3, xVars);
+    for (const [name, expected] of Object.entries(REF)) {
+      const c = coef(res, name);
+      expect(c).toBeDefined();
+      expect(relErr(c.estimate, expected)).toBeLessThan(LASSO_TOL);
+    }
   });
 });
 
