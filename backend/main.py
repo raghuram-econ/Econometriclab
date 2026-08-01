@@ -967,6 +967,106 @@ def run_rdd(req: RDDRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
 
+class PowerRequest(BaseModel):
+    design: str = "ttest"           # 'ttest' | 'cluster-main' | 'cluster-interaction'
+    solveFor: str = "n"             # 'n' | 'power' | 'mdes' (ttest only)
+    alpha: float = 0.05
+    power: float = 0.80
+    effectSize: float = 0.3         # Cohen's d (ttest) or SD-unit effect (cluster-main target)
+    nPerGroup: float = 100.0        # ttest, when solving power/mdes
+    ratio: float = 1.0
+    # cluster parameters
+    nClusters: int = 30
+    clusterSize: int = 50
+    icc: float = 0.10
+    rSquared: float = 0.0           # baseline covariate R^2 (ANCOVA gain)
+    pDisadv: float = 0.5
+    effectMain: float = 0.25
+    effectInteraction: float = 0.20
+    nSims: int = 1000
+    seed: int = 2025
+
+@app.post("/python/power")
+def run_power(req: PowerRequest):
+    """Research-grade power analysis: statsmodels (matches R pwr) for standard
+    designs; closed-form design effect (matches PowerUpR) and Monte-Carlo
+    simulation for cluster-randomized main and interaction effects."""
+    try:
+        import numpy as np
+        from scipy import stats
+        za = float(stats.norm.ppf(1 - req.alpha / 2))
+        zb = float(stats.norm.ppf(req.power))
+
+        if req.design == "ttest":
+            from statsmodels.stats.power import TTestIndPower
+            an = TTestIndPower()
+            if req.solveFor == "power":
+                pw = an.solve_power(effect_size=req.effectSize, nobs1=req.nPerGroup,
+                                    alpha=req.alpha, ratio=req.ratio, alternative='two-sided')
+                return {"design": "ttest", "solveFor": "power", "power": safe_float(pw),
+                        "engine": "python", "method": "statsmodels TTestIndPower (matches R pwr::pwr.t.test)"}
+            if req.solveFor == "mdes":
+                es = an.solve_power(nobs1=req.nPerGroup, alpha=req.alpha, power=req.power,
+                                    ratio=req.ratio, alternative='two-sided')
+                return {"design": "ttest", "solveFor": "mdes", "mdes": safe_float(es),
+                        "engine": "python", "method": "statsmodels TTestIndPower (matches R pwr::pwr.t.test)"}
+            n1 = an.solve_power(effect_size=req.effectSize, alpha=req.alpha, power=req.power,
+                                ratio=req.ratio, alternative='two-sided')
+            n1c = float(np.ceil(n1))
+            return {"design": "ttest", "solveFor": "n", "nPerGroup": n1c,
+                    "nTotal": n1c * (1 + req.ratio), "engine": "python",
+                    "method": "statsmodels TTestIndPower (matches R pwr::pwr.t.test)"}
+
+        if req.design == "cluster-main":
+            m, K = req.clusterSize, req.nClusters
+            N = K * m
+            DE = 1 + (m - 1) * req.icc
+            mdes = (za + zb) * float(np.sqrt(4 * DE * (1 - req.rSquared) / N))
+            reqK = int(np.ceil(4 * DE * (1 - req.rSquared) * (za + zb) ** 2 / (m * req.effectSize ** 2)))
+            return {"design": "cluster-main", "mdes": safe_float(mdes), "designEffect": safe_float(DE),
+                    "nTotal": int(N), "requiredClusters": reqK, "engine": "python",
+                    "method": "design-effect closed form (matches PowerUpR power.cra2)"}
+
+        if req.design == "cluster-interaction":
+            nsims = int(min(max(req.nSims, 100), 2000))
+            rng = np.random.default_rng(req.seed)
+            nc, m = req.nClusters, req.clusterSize
+            icc, R = req.icc, req.rSquared
+            b_pre = float(np.sqrt(max(R, 0.0)) * np.sqrt(1 - icc))
+            resid_sd = float(np.sqrt(max((1 - icc) * (1 - R), 1e-9)))
+            hit_main = hit_int = 0
+            for _ in range(nsims):
+                u = rng.normal(0, np.sqrt(icc), nc)
+                treat = np.zeros(nc); treat[rng.choice(nc, nc // 2, replace=False)] = 1
+                disadv = rng.binomial(1, req.pDisadv, (nc, m))
+                pretest = rng.normal(0, 1, (nc, m))
+                e = rng.normal(0, resid_sd, (nc, m))
+                y = (u[:, None] + b_pre * pretest + req.effectMain * treat[:, None]
+                     + req.effectInteraction * treat[:, None] * disadv + e)
+                cl = np.repeat(np.arange(nc), m); tr = np.repeat(treat, m)
+                dv = disadv.ravel(); pr = pretest.ravel(); yy = y.ravel()
+                X = np.column_stack([np.ones_like(yy), tr, dv, tr * dv, pr])
+                XtX_inv = np.linalg.inv(X.T @ X); beta = XtX_inv @ X.T @ yy
+                resid = yy - X @ beta; G = nc; n, k = X.shape
+                meat = np.zeros((k, k))
+                for g in np.unique(cl):
+                    s = X[cl == g].T @ resid[cl == g]; meat += np.outer(s, s)
+                dfc = (G / (G - 1)) * ((n - 1) / (n - k))
+                se = np.sqrt(np.diag(dfc * (XtX_inv @ meat @ XtX_inv)))
+                if 2 * (1 - stats.norm.cdf(abs(beta[1] / se[1]))) < req.alpha: hit_main += 1
+                if 2 * (1 - stats.norm.cdf(abs(beta[3] / se[3]))) < req.alpha: hit_int += 1
+            return {"design": "cluster-interaction", "powerMain": safe_float(hit_main / nsims),
+                    "powerInteraction": safe_float(hit_int / nsims), "nSims": nsims,
+                    "nTotal": int(nc * m), "engine": "python",
+                    "method": f"Monte-Carlo simulation ({nsims} reps), ANCOVA + cluster-robust SE"}
+
+        raise HTTPException(status_code=422, detail=f"Unknown design '{req.design}'. Use ttest, cluster-main, or cluster-interaction.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 class ARIMARequest(BaseModel):
     series: List[float]
     p: int

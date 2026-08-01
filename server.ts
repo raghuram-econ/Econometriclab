@@ -361,6 +361,7 @@ async function startServer() {
     "/api/python/garch": "/python/garch",
     "/api/python/unit-root": "/python/unit-root",
     "/api/python/rdd": "/python/rdd",
+    "/api/python/power": "/python/power",
   };
 
   app.post(Object.keys(PYTHON_JSON_ROUTES), async (req, res) => {

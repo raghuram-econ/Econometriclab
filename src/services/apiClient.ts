@@ -192,6 +192,29 @@ export async function runRDDPy(payload: {
   return callBackendAPI('/api/python/rdd', payload);
 }
 
+// Research-grade power analysis: statsmodels (matches R pwr) for standard
+// designs, closed-form / Monte-Carlo simulation for cluster-randomized designs.
+export async function runPower(payload: {
+  design: 'ttest' | 'cluster-main' | 'cluster-interaction';
+  solveFor?: 'n' | 'power' | 'mdes';
+  alpha?: number;
+  power?: number;
+  effectSize?: number;
+  nPerGroup?: number;
+  ratio?: number;
+  nClusters?: number;
+  clusterSize?: number;
+  icc?: number;
+  rSquared?: number;
+  pDisadv?: number;
+  effectMain?: number;
+  effectInteraction?: number;
+  nSims?: number;
+  seed?: number;
+}): Promise<any> {
+  return callBackendAPI('/api/python/power', payload);
+}
+
 // Python Backend Full ARIMA (Kalman-filter MLE via statsmodels, with MA terms
 // and real forecast standard errors -- the benchmark-grade path; the browser
 // engine is a lightweight CSS-based preview, see AdvancedTimeSeriesLab).
