@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { runOLS } from '../../lib/econometrics/ols';
 import { runSharpRDD } from '../../lib/econometrics/rdd';
-import { runGMM, runRDDPy } from '../../services/apiClient';
+import { runGMM, runRDDPy, runSyntheticControl } from '../../services/apiClient';
 import { Dataset, AnalysisResult } from '../../types';
 import { cn, fmt, fmtP, stars } from '../../lib/utils';
 import jStat from 'jstat';
@@ -24,7 +24,7 @@ interface CausalLabProps {
   onRunComplete: (r: AnalysisResult) => void;
 }
 
-type TabType = 'did' | 'iv' | 'rd' | 'gmm';
+type TabType = 'did' | 'iv' | 'rd' | 'gmm' | 'synth';
 
 export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [activeTab, setActiveTab] = useState<TabType>('did');
@@ -58,6 +58,23 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [gmmDep, setGmmDep] = useState('');
   const [gmmInstruments, setGmmInstruments] = useState<string[]>([]);
   const [gmmResult, setGmmResult] = useState<any | null>(null);
+
+  // Synthetic Control Method state (Abadie-Diamond-Hainmueller, Python backend)
+  const [scUnitVar, setScUnitVar] = useState('');
+  const [scTimeVar, setScTimeVar] = useState('');
+  const [scOutcomeVar, setScOutcomeVar] = useState('');
+  const [scTreatedUnit, setScTreatedUnit] = useState('');
+  const [scPreStart, setScPreStart] = useState('');
+  const [scPreEnd, setScPreEnd] = useState('');
+  const [scPostEnd, setScPostEnd] = useState('');
+  const [scResult, setScResult] = useState<any | null>(null);
+  const [scRunning, setScRunning] = useState(false);
+  const [scError, setScError] = useState<string | null>(null);
+
+  const scUnitValues = useMemo(() => {
+    if (!dataset || !scUnitVar) return [];
+    return Array.from(new Set((dataset.data || []).map(r => String(r[scUnitVar])))).filter(Boolean);
+  }, [dataset, scUnitVar]);
 
   const [isEstimating, setIsEstimating] = useState(false);
   const [estimationError, setEstimationError] = useState<string | null>(null);
@@ -451,6 +468,33 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
     }
   };
 
+  // --- SYNTHETIC CONTROL METHOD (Abadie-Diamond-Hainmueller, Python backend) ---
+  const handleRunSynth = async () => {
+    if (!scUnitVar || !scTimeVar || !scOutcomeVar || !scTreatedUnit || !scPreStart || !scPreEnd || !scPostEnd) return;
+    setScRunning(true);
+    setScError(null);
+    try {
+      const controlUnits = scUnitValues.filter(u => u !== scTreatedUnit);
+      if (controlUnits.length < 2) throw new Error('Need at least 2 control (donor) units besides the treated unit.');
+      const res = await runSyntheticControl({
+        data: dataset.data || [],
+        unitVar: scUnitVar, timeVar: scTimeVar, outcomeVar: scOutcomeVar,
+        treatedUnit: scTreatedUnit, controlUnits,
+        preperiodStart: parseFloat(scPreStart), preperiodEnd: parseFloat(scPreEnd), postperiodEnd: parseFloat(scPostEnd),
+      });
+      setScResult(res);
+      onRunComplete({
+        type: 'generic',
+        specification: `Synthetic Control: ${scTreatedUnit} vs. donor pool (${controlUnits.length} units)`,
+        results: res
+      });
+    } catch (err: any) {
+      setScError(`Estimation error: ${err.message || err}`);
+    } finally {
+      setScRunning(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-stone-200 pb-4">
@@ -496,6 +540,15 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
             )}
           >
             Dynamic GMM
+          </button>
+          <button
+            onClick={() => setActiveTab('synth')}
+            className={cn(
+              "px-4 py-2 text-xs font-bold uppercase tracking-widest rounded-lg transition-all",
+              activeTab === 'synth' ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-700"
+            )}
+          >
+            Synthetic Control
           </button>
         </div>
       </div>
@@ -1216,6 +1269,132 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                       </tbody>
                     </table>
                   </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SYNTHETIC CONTROL PANEL */}
+      {activeTab === 'synth' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          <div className="lg:col-span-4 p-6 bg-white border border-stone-200 rounded-2xl shadow-sm space-y-4">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 flex items-center gap-2">
+              <Target className="w-4 h-4 text-stone-600" />
+              Synthetic Control Method
+            </h3>
+            <p className="text-[10px] text-stone-400 leading-relaxed">
+              Abadie-Diamond-Hainmueller: builds a weighted combination of donor units that best reproduces the treated unit's pre-treatment path, then compares post-treatment gaps. Data must be a unit &times; time panel. Runs on the Python (pysyncon) engine &mdash; matches R's Synth package.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Unit Variable (e.g. state/country)</label>
+                <select value={scUnitVar} onChange={e => { setScUnitVar(e.target.value); setScTreatedUnit(''); }} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="">Select variable...</option>
+                  {variables.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Time Variable</label>
+                <select value={scTimeVar} onChange={e => setScTimeVar(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="">Select variable...</option>
+                  {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Outcome Variable (Y)</label>
+                <select value={scOutcomeVar} onChange={e => setScOutcomeVar(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="">Select variable...</option>
+                  {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Treated Unit</label>
+                <select value={scTreatedUnit} onChange={e => setScTreatedUnit(e.target.value)} disabled={!scUnitVar} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800 disabled:opacity-50">
+                  <option value="">Select unit...</option>
+                  {scUnitValues.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+                {scUnitVar && <p className="text-[9px] text-stone-400 mt-1">All other units become the donor pool.</p>}
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[9px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Pre-start</label>
+                  <input type="number" value={scPreStart} onChange={e => setScPreStart(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2 text-xs font-bold text-stone-800" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Treat. starts</label>
+                  <input type="number" value={scPreEnd} onChange={e => setScPreEnd(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2 text-xs font-bold text-stone-800" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Post-end</label>
+                  <input type="number" value={scPostEnd} onChange={e => setScPostEnd(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2 text-xs font-bold text-stone-800" />
+                </div>
+              </div>
+              <p className="text-[9px] text-stone-400 leading-relaxed">"Pre-start" to just before "Treat. starts" is the pre-treatment fitting window; "Treat. starts" through "Post-end" is where the treatment effect (gap) is measured.</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button onClick={handleRunSynth} disabled={scRunning || !scUnitVar || !scTimeVar || !scOutcomeVar || !scTreatedUnit || !scPreStart || !scPreEnd || !scPostEnd}
+                className="w-full py-2.5 bg-[#1B2E41] hover:bg-[#243D54] disabled:bg-stone-300 text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2">
+                {scRunning ? (
+                  <div className="flex items-center gap-2"><div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" /><span>Optimizing donor weights...</span></div>
+                ) : (<>Run Synthetic Control <ArrowRight className="w-4 h-4" /></>)}
+              </button>
+              {scError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-[10px] font-medium flex items-start gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+                  <div><span className="font-bold block mb-0.5 uppercase tracking-widest text-[9px] text-red-800">Estimation Failed</span>{scError}</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="lg:col-span-8 space-y-6">
+            {!scResult ? (
+              <div className="p-12 text-center bg-stone-50 border border-stone-200 rounded-2xl h-full flex flex-col justify-center items-center">
+                <Target className="w-10 h-10 text-stone-300 mb-2" />
+                <h4 className="text-sm font-bold text-stone-600">No Synthetic Control Run</h4>
+                <p className="text-xs text-stone-400 font-serif italic max-w-sm mt-1">Select a treated unit and pre/post windows to construct its synthetic counterfactual from the donor pool.</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <span className="inline-block text-[9px] font-mono font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5">Python / pysyncon (research-grade, matches R Synth)</span>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Average Treatment Effect</span>
+                    <span className="text-xl font-serif font-bold text-[#1B2E41]">{fmt(scResult.att)}</span>
+                  </div>
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Std Error</span>
+                    <span className="text-xl font-serif text-stone-800">{fmt(scResult.attSE)}</span>
+                  </div>
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Pre-Treatment MSPE</span>
+                    <span className="text-xl font-serif text-stone-800">{fmt(scResult.preTreatmentMSPE)}</span>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-stone-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4">Donor Weights</h3>
+                  <div className="overflow-x-auto">
+                    <table className="journal-table">
+                      <thead><tr><th>Donor Unit</th><th>Weight</th></tr></thead>
+                      <tbody>
+                        {Object.entries(scResult.weights || {}).filter(([, w]: any) => (w as number) > 0.001).sort((a: any, b: any) => b[1] - a[1]).map(([unit, w]: any) => (
+                          <tr key={unit}><td className="font-mono text-xs">{unit}</td><td className="text-right">{fmt(w)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-2">
+                  <h4 className="text-xs font-bold text-stone-800 uppercase tracking-wider flex items-center gap-2">
+                    <HelpCircle className="w-4 h-4 text-stone-600" /> Interpretation
+                  </h4>
+                  <p className="text-xs text-stone-600 leading-relaxed font-serif">
+                    The synthetic {scTreatedUnit} is a weighted combination of the donor units above, chosen to best match {scTreatedUnit}'s pre-treatment ({scPreStart}&ndash;{parseFloat(scPreEnd || '0') - 1}) outcome path (low MSPE = good fit). The average post-treatment gap between the actual and synthetic path is the estimated treatment effect, with an inferential SE from placebo-style variation.
+                  </p>
                 </div>
               </div>
             )}

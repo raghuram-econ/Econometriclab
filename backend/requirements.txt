@@ -8,6 +8,7 @@ linearmodels>=6.0.0
 lifelines>=0.28.0
 arch>=6.3.0
 rdrobust>=1.3.0
+pysyncon>=1.4.0
 pydantic>=2.6.0
 python-multipart>=0.0.9
 pyreadstat>=1.2.0

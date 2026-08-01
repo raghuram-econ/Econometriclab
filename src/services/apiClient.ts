@@ -194,6 +194,23 @@ export async function runRDDPy(payload: {
 
 // Research-grade power analysis: statsmodels (matches R pwr) for standard
 // designs, closed-form / Monte-Carlo simulation for cluster-randomized designs.
+// Synthetic Control Method (Abadie-Diamond-Hainmueller) via `pysyncon`,
+// matching R's `Synth` package.
+export async function runSyntheticControl(payload: {
+  data: any[];
+  unitVar: string;
+  timeVar: string;
+  outcomeVar: string;
+  predictorVars?: string[];
+  treatedUnit: string;
+  controlUnits: string[];
+  preperiodStart: number;
+  preperiodEnd: number;
+  postperiodEnd: number;
+}): Promise<any> {
+  return callBackendAPI('/api/python/synthetic-control', payload);
+}
+
 export async function runPower(payload: {
   design: 'ttest' | 'cluster-main' | 'cluster-interaction';
   solveFor?: 'n' | 'power' | 'mdes';

@@ -1067,6 +1067,75 @@ def run_power(req: PowerRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
 
+class SyntheticControlRequest(BaseModel):
+    data: List[Dict[str, Any]]
+    unitVar: str
+    timeVar: str
+    outcomeVar: str
+    predictorVars: List[str] = []
+    treatedUnit: str
+    controlUnits: List[str]
+    preperiodStart: float
+    preperiodEnd: float
+    postperiodEnd: float
+
+@app.post("/python/synthetic-control")
+def run_synthetic_control(req: SyntheticControlRequest):
+    """Synthetic Control Method (Abadie-Diamond-Hainmueller) via `pysyncon`,
+    the Python package matching R's `Synth`."""
+    try:
+        import pandas as pd
+        from pysyncon import Dataprep, Synth
+
+        df = pd.DataFrame(req.data)
+        pre_range = range(int(req.preperiodStart), int(req.preperiodEnd) + 1)
+        post_range = range(int(req.preperiodEnd) + 1, int(req.postperiodEnd) + 1)
+        if len(post_range) < 1:
+            raise HTTPException(status_code=422, detail="No post-treatment periods; postperiodEnd must be after preperiodEnd.")
+
+        predictors = req.predictorVars if req.predictorVars else [req.outcomeVar]
+        dataprep = Dataprep(
+            foo=df, predictors=predictors, predictors_op="mean",
+            time_predictors_prior=pre_range, dependent=req.outcomeVar,
+            unit_variable=req.unitVar, time_variable=req.timeVar,
+            treatment_identifier=req.treatedUnit, controls_identifier=req.controlUnits,
+            time_optimize_ssr=pre_range,
+        )
+        synth = Synth()
+        synth.fit(dataprep=dataprep)
+
+        weights = {str(k): safe_float(v) for k, v in synth.weights().to_dict().items()}
+        mspe = safe_float(synth.mspe())
+        att_result = synth.att(time_period=post_range)
+
+        all_periods = sorted(df[req.timeVar].unique().tolist())
+        treated_path = df[df[req.unitVar] == req.treatedUnit].set_index(req.timeVar)[req.outcomeVar]
+        synthetic_path = []
+        for t in all_periods:
+            row_t = df[df[req.timeVar] == t]
+            val = 0.0
+            for unit, w in weights.items():
+                match = row_t[row_t[req.unitVar] == unit]
+                if not match.empty and w:
+                    val += w * float(match[req.outcomeVar].iloc[0])
+            synthetic_path.append(val)
+
+        return {
+            "weights": weights,
+            "preTreatmentMSPE": mspe,
+            "att": safe_float(att_result.get("att")),
+            "attSE": safe_float(att_result.get("se")),
+            "periods": [safe_float(t) for t in all_periods],
+            "actualPath": [safe_float(treated_path.get(t)) for t in all_periods],
+            "syntheticPath": [safe_float(v) for v in synthetic_path],
+            "treatmentPeriod": safe_float(req.preperiodEnd) + 1,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 class ARIMARequest(BaseModel):
     series: List[float]
     p: int
