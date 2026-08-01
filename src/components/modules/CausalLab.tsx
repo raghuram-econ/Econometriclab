@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { runOLS } from '../../lib/econometrics/ols';
 import { runSharpRDD } from '../../lib/econometrics/rdd';
-import { runGMM } from '../../services/apiClient';
+import { runGMM, runRDDPy } from '../../services/apiClient';
 import { Dataset, AnalysisResult } from '../../types';
 import { cn, fmt, fmtP, stars } from '../../lib/utils';
 import jStat from 'jstat';
@@ -50,6 +50,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [rdBandwidth, setRdBandwidth] = useState('1');
   const [rdPolynomial, setRdPolynomial] = useState<'linear' | 'quadratic'>('linear');
   const [rdResult, setRdResult] = useState<any | null>(null);
+  const [researchGradeRd, setResearchGradeRd] = useState(false);
 
   // Dynamic Panel GMM State (Arellano-Bond, Python backend)
   const [gmmEntity, setGmmEntity] = useState('');
@@ -281,6 +282,39 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   // --- REGRESSION DISCONTINUITY ESTIMATOR ---
   const handleRunRD = () => {
     if (!rdOutcome || !rdRunning) return;
+
+    // Research-grade path: rdrobust (MSE-optimal bandwidth + bias correction).
+    if (researchGradeRd) {
+      setIsEstimating(true);
+      setEstimationError(null);
+      (async () => {
+        try {
+          const data = dataset.data || [];
+          const cutoff = Number(rdCutoff) || 0;
+          const rows = data.filter(r => !isNaN(parseFloat(r[rdOutcome])) && !isNaN(parseFloat(r[rdRunning])));
+          const res = await runRDDPy({
+            y: rows.map(r => parseFloat(r[rdOutcome])),
+            x: rows.map(r => parseFloat(r[rdRunning])),
+            cutoff,
+          });
+          setRdResult({
+            engine: 'python',
+            rdEstimate: res.coef, rdSE: res.seRobust, rdP: res.pValueRobust,
+            rdT: (typeof res.coef === 'number' && res.seRobust) ? res.coef / res.seRobust : 0,
+            ciLow: res.ciLow, ciHigh: res.ciHigh, bandwidth: res.bandwidth, nUsed: res.nUsed,
+            cutoff, rdOutcome, rdRunning,
+            specification: `RDD (rdrobust): ${rdOutcome} jump at ${rdRunning} = ${cutoff}`,
+          });
+          onRunComplete({ type: 'generic', specification: `RDD (rdrobust): ${rdOutcome}`, results: res });
+        } catch (err: any) {
+          setEstimationError(`Estimation error: ${err.message || err}`);
+        } finally {
+          setIsEstimating(false);
+        }
+      })();
+      return;
+    }
+
     setIsEstimating(true);
     setEstimationError(null);
     try {
@@ -932,6 +966,11 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                   <option value="quadratic">Local Quadratic</option>
                 </select>
               </div>
+
+              <label className="flex items-start gap-2 text-[11px] text-stone-600 cursor-pointer bg-stone-50 border border-stone-100 rounded-lg p-2.5">
+                <input type="checkbox" checked={researchGradeRd} onChange={e => setResearchGradeRd(e.target.checked)} className="rounded text-[#1B2E41] focus:ring-[#1B2E41] mt-0.5" />
+                <span>Research-grade engine (Python / rdrobust) <span className="text-stone-400">— MSE bandwidth + bias correction. Requires sign-in.</span></span>
+              </label>
             </div>
 
             <div className="flex flex-col gap-2">
@@ -969,6 +1008,32 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                 <Target className="w-10 h-10 text-stone-300 mb-2" />
                 <h4 className="text-sm font-bold text-stone-600">No RD Estimate Run</h4>
                 <p className="text-xs text-stone-400 font-serif italic max-w-sm mt-1">Specify parameters to measure discontinuity and intercept jumps at your running variable's cutoff threshold.</p>
+              </div>
+            ) : rdResult.engine === 'python' ? (
+              <div className="space-y-6 animate-in fade-in duration-500">
+                <span className="inline-block text-[9px] font-mono font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5">Python / rdrobust (research-grade)</span>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">RD Effect (coef)</span>
+                    <span className="text-xl font-serif font-bold text-[#1B2E41]">{fmt(rdResult.rdEstimate)}</span>
+                  </div>
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Robust p-value</span>
+                    <span className="text-xl font-serif font-bold text-stone-800">{fmtP(rdResult.rdP)}</span>
+                  </div>
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">MSE Bandwidth</span>
+                    <span className="text-xl font-serif text-stone-800">{fmt(rdResult.bandwidth)}</span>
+                  </div>
+                </div>
+                <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-2">
+                  <h4 className="text-xs font-bold text-stone-800 uppercase tracking-wider flex items-center gap-2">
+                    <HelpCircle className="w-4 h-4 text-stone-600" /> rdrobust estimate
+                  </h4>
+                  <p className="text-xs text-stone-600 leading-relaxed font-serif">
+                    Local-linear RD with MSE-optimal bandwidth and robust, bias-corrected inference — the same algorithm as R's <span className="font-mono">rdrobust</span>. Robust SE = {fmt(rdResult.rdSE)}, 95% CI = [{fmt(rdResult.ciLow)}, {fmt(rdResult.ciHigh)}], N used = {rdResult.nUsed}.
+                  </p>
+                </div>
               </div>
             ) : (
               <div className="space-y-6 animate-in fade-in duration-500">

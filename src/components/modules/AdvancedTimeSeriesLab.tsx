@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { Dataset } from '../../types';
 import { generateMasterDataset } from '../../lib/dataGenerators';
-import { runJohansen, runCointegration } from '../../services/apiClient';
+import { runJohansen, runCointegration, runGARCHPy } from '../../services/apiClient';
 import { runGARCH, runGrangerCausality } from '../../lib/econometrics/arima';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
 import { ResponsiveContainer, LineChart as RecLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
@@ -62,6 +62,7 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
   const [lagOrder, setLagOrder] = useState<number>(1);
   const [results, setResults] = useState<any | null>(null);
   const [isRunning, setIsRunning] = useState<boolean>(false);
+  const [researchGradeGarch, setResearchGradeGarch] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'estimation' | 'results' | 'irf' | 'cointegration'>('estimation');
 
   // Cointegration States
@@ -159,7 +160,38 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
   };
 
   const handleRunEstimation = () => {
-    if (!activeDataset || !varY1 || !varY2) return;
+    if (!activeDataset || !varY1) return;
+    if (modelType === 'var' && !varY2) return;
+
+    // Research-grade path: fit GARCH on the Python backend via the `arch` package.
+    if (modelType === 'garch' && researchGradeGarch) {
+      setIsRunning(true);
+      (async () => {
+        try {
+          const series1 = activeDataset.data.map(r => parseFloat(r[varY1])).filter(v => !isNaN(v));
+          if (series1.length < 20) throw new Error('Need at least 20 observations for GARCH estimation.');
+          const res = await runGARCHPy({ series: series1, p: 1, q: 1 });
+          const mean1 = series1.reduce((s, v) => s + v, 0) / series1.length;
+          const vol: number[] = res.conditionalVolatility || [];
+          const volSeries = vol.map((v: number, idx: number) => ({ time: idx, residual: (series1[idx] ?? mean1) - mean1, volatility: v }));
+          const denom = 1 - (res.alpha || 0) - (res.beta || 0);
+          setResults({
+            type: 'garch', n: res.nobs ?? series1.length, variable: varY1,
+            omega: res.omega, alpha: res.alpha, beta: res.beta, persistence: res.persistence,
+            logLik: res.logLik, aic: res.aic, bic: res.bic,
+            unconditionalVol: denom > 1e-8 ? Math.sqrt((res.omega || 0) / denom) : NaN,
+            engine: 'python', volSeries,
+          });
+          setActiveTab('results');
+        } catch (err: any) {
+          alert(err?.message || 'Python GARCH failed. Ensure the backend is running and you are signed in.');
+        } finally {
+          setIsRunning(false);
+        }
+      })();
+      return;
+    }
+
     setIsRunning(true);
 
     setTimeout(() => {
@@ -469,6 +501,10 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
                           <option key={v} value={v}>{v}</option>
                         ))}
                       </select>
+                      <label className="flex items-start gap-2 text-[11px] text-stone-600 cursor-pointer bg-stone-50 border border-stone-100 rounded-lg p-2.5 mt-2">
+                        <input type="checkbox" checked={researchGradeGarch} onChange={e => setResearchGradeGarch(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 mt-0.5" />
+                        <span>Research-grade engine (Python / arch) <span className="text-stone-400">— full MLE GARCH. Requires sign-in.</span></span>
+                      </label>
                     </div>
                   )}
 
@@ -527,6 +563,9 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
               <h4 className="text-lg font-serif font-bold text-stone-900">
                 {results.type === 'var' ? 'Estimated VAR(1) Coefficient Matrices' : 'ARCH/GARCH Volatility Estimates'}
               </h4>
+              {results.engine === 'python' && (
+                <span className="inline-block text-[9px] font-mono font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5">Python / arch (research-grade)</span>
+              )}
 
               {results.type === 'var' ? (
                 <>

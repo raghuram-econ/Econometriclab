@@ -18,6 +18,7 @@ import { ModuleIntroCard } from '../shared/ModuleIntroCard';
 import jStat from 'jstat';
 import * as math from 'mathjs';
 import { approximateADFPValue, runKPSSTest, runPhillipsPerronTest } from '../../lib/econometrics/arima';
+import { runUnitRoot } from '../../services/apiClient';
 
 interface StatTestsLabProps {
   dataset: Dataset | null;
@@ -64,6 +65,7 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
   const [lagLength, setLagLength] = useState<number>(1);
   const [testResult, setTestResult] = useState<any | null>(null);
   const [isRunning, setIsRunning] = useState<boolean>(false);
+  const [researchGrade, setResearchGrade] = useState<boolean>(false);
 
   // Automatically pick a variable when dataset is loaded
   React.useEffect(() => {
@@ -79,9 +81,46 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
     }
   }, [numericVariables, selectedVar, selectedVarX]);
 
-  const handleRunTest = () => {
+  const handleRunTest = async () => {
     if (!activeDataset || !selectedVar) return;
     setIsRunning(true);
+
+    // Research-grade path: route unit-root tests to the Python backend
+    // (statsmodels ADF/KPSS, arch Phillips-Perron) instead of the browser engine.
+    const isUnitRoot = testType === 'stationarity' || testType === 'kpss' || testType === 'phillips';
+    if (researchGrade && isUnitRoot) {
+      try {
+        const series = activeDataset.data.map(row => parseFloat(row[selectedVar])).filter(v => !isNaN(v));
+        if (series.length < 12) throw new Error('Insufficient observations (need at least 12).');
+        const testMap: Record<string, 'adf' | 'kpss' | 'pp'> = { stationarity: 'adf', kpss: 'kpss', phillips: 'pp' };
+        const test = testMap[testType] ?? 'adf';
+        const res = await runUnitRoot({ series, test, regression: 'c' });
+        const cv = res.critValues || {};
+        const isKpss = testType === 'kpss';
+        const reject = typeof res.pValue === 'number' ? res.pValue < 0.05 : false;
+        setTestResult({
+          type: testType,
+          variable: selectedVar,
+          n: res.nobs ?? series.length,
+          stat: res.stat,
+          pValue: res.pValue,
+          reject: isKpss ? reject : undefined,
+          criticalValues: { '1%': cv['1%'] ?? 0, '5%': cv['5%'] ?? 0, '10%': cv['10%'] ?? 0 },
+          engine: 'python',
+          nullHypothesis: isKpss ? 'The variable is (trend-)stationary.' : 'The variable has a unit root (is non-stationary).',
+          altHypothesis: isKpss ? 'The variable has a unit root (is non-stationary).' : 'The variable is stationary (has no unit root).',
+          decision: isKpss
+            ? (reject ? 'Reject Null (Non-Stationary)' : 'Fail to Reject Null (Stationary)')
+            : (reject ? 'Reject Null (Stationary)' : 'Fail to Reject Null (Non-Stationary)'),
+        });
+        if (onRunComplete) onRunComplete({ testType, selectedVar, engine: 'python' }, `STAT_TEST(python): ${testType.toUpperCase()} on ${selectedVar}`);
+      } catch (err: any) {
+        alert(err?.message || 'Python unit-root test failed. Ensure the backend is running and you are signed in.');
+      } finally {
+        setIsRunning(false);
+      }
+      return;
+    }
 
     setTimeout(() => {
       try {
@@ -439,6 +478,10 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
                 </div>
               )}
 
+              <label className="flex items-start gap-2 text-[11px] text-stone-600 cursor-pointer bg-stone-50 border border-stone-100 rounded-lg p-2.5">
+                <input type="checkbox" checked={researchGrade} onChange={e => setResearchGrade(e.target.checked)} className="rounded text-indigo-600 focus:ring-indigo-500 mt-0.5" />
+                <span>Research-grade engine (Python) <span className="text-stone-400">— routes ADF / KPSS / PP to statsmodels + arch. Requires sign-in.</span></span>
+              </label>
               <button
                 onClick={handleRunTest}
                 disabled={isRunning || !selectedVar}
@@ -471,7 +514,7 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
                       {testResult.type === 'autocorrelation' && 'Durbin-Watson Autocorrelation Output'}
                       {testResult.type === 'specification' && 'Ramsey RESET Specification Output'}
                     </h4>
-                    <p className="text-xs text-stone-500 font-mono mt-1">Series: {testResult.variable} | N = {testResult.n}</p>
+                    <p className="text-xs text-stone-500 font-mono mt-1">Series: {testResult.variable} | N = {testResult.n}{testResult.engine === 'python' ? ' | Engine: Python (research-grade)' : ''}</p>
                   </div>
                   <div className={`px-3 py-1 rounded-full text-[10px] font-bold font-mono uppercase tracking-wider ${
                     (testResult.reject !== undefined
