@@ -1136,6 +1136,69 @@ def run_synthetic_control(req: SyntheticControlRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
 
+class StaggeredDIDRequest(BaseModel):
+    data: List[Dict[str, Any]]
+    idVar: str
+    timeVar: str
+    outcomeVar: str
+    groupVar: str   # period each unit is first treated; 0 (or NaN) = never treated
+    controlGroup: str = "nevertreated"   # 'nevertreated' | 'notyettreated'
+
+@app.post("/python/staggered-did")
+def run_staggered_did(req: StaggeredDIDRequest):
+    """Callaway-Sant'Anna staggered-adoption DiD via `csdid`, a faithful Python
+    port of R's `did` package (att_gt + aggte), matching its parameters."""
+    try:
+        import pandas as pd
+        from csdid.att_gt import ATTgt
+
+        df = pd.DataFrame(req.data)
+        df[req.groupVar] = pd.to_numeric(df[req.groupVar], errors="coerce").fillna(0)
+        cg = req.controlGroup if req.controlGroup in ("nevertreated", "notyettreated") else "nevertreated"
+
+        att_gt = ATTgt(
+            yname=req.outcomeVar, tname=req.timeVar, idname=req.idVar, gname=req.groupVar,
+            data=df, control_group=[cg],
+        )
+        fitted = att_gt.fit(est_method="dr")
+
+        raw = fitted.results
+        group_time = [
+            {
+                "group": safe_float(raw["group"][i]),
+                "time": safe_float(raw["year"][i]),
+                "att": safe_float(raw["att"][i]),
+                "se": safe_float(raw["se"][i]),
+            }
+            for i in range(len(raw["group"]))
+        ]
+
+        dyn = fitted.aggte(typec="dynamic")
+        dynamic = {
+            "eventTime": [int(e) for e in dyn.atte["egt"]],
+            "att": [safe_float(v) for v in dyn.atte["att_egt"]],
+            "se": [safe_float(v) for v in np.ravel(dyn.atte["se_egt"])],
+            "overallATT": safe_float(dyn.atte["overall_att"]),
+            "overallSE": safe_float(np.ravel(dyn.atte["overall_se"])[0]) if dyn.atte["overall_se"] is not None else None,
+        }
+
+        simp = att_gt.fit(est_method="dr").aggte(typec="simple")
+        simple = {
+            "att": safe_float(simp.atte["overall_att"]),
+            "se": safe_float(np.ravel(simp.atte["overall_se"])[0]) if simp.atte["overall_se"] is not None else None,
+        }
+
+        return {
+            "groupTimeATT": group_time,
+            "dynamic": dynamic,
+            "simple": simple,
+            "controlGroup": cg,
+            "estMethod": "Doubly Robust (dr)",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 class ARIMARequest(BaseModel):
     series: List[float]
     p: int

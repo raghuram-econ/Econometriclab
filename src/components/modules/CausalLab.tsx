@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { runOLS } from '../../lib/econometrics/ols';
 import { runSharpRDD } from '../../lib/econometrics/rdd';
-import { runGMM, runRDDPy, runSyntheticControl } from '../../services/apiClient';
+import { runGMM, runRDDPy, runSyntheticControl, runStaggeredDID } from '../../services/apiClient';
 import { Dataset, AnalysisResult } from '../../types';
 import { cn, fmt, fmtP, stars } from '../../lib/utils';
 import jStat from 'jstat';
@@ -30,11 +30,22 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [activeTab, setActiveTab] = useState<TabType>('did');
 
   // Difference-in-Differences State
+  const [didMode, setDidMode] = useState<'simple' | 'staggered'>('simple');
   const [didOutcome, setDidOutcome] = useState('');
   const [didTreatment, setDidTreatment] = useState('');
   const [didTime, setDidTime] = useState('');
   const [didControls, setDidControls] = useState<string[]>([]);
   const [didResult, setDidResult] = useState<any | null>(null);
+
+  // Staggered-adoption DiD state (Callaway-Sant'Anna, Python backend)
+  const [sdidId, setSdidId] = useState('');
+  const [sdidTime, setSdidTime] = useState('');
+  const [sdidOutcome, setSdidOutcome] = useState('');
+  const [sdidGroup, setSdidGroup] = useState('');
+  const [sdidControlGroup, setSdidControlGroup] = useState<'nevertreated' | 'notyettreated'>('nevertreated');
+  const [sdidResult, setSdidResult] = useState<any | null>(null);
+  const [sdidRunning, setSdidRunning] = useState(false);
+  const [sdidError, setSdidError] = useState<string | null>(null);
 
   // 2SLS State
   const [ivOutcome, setIvOutcome] = useState('');
@@ -495,6 +506,30 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
     }
   };
 
+  // --- STAGGERED-ADOPTION DIFFERENCE-IN-DIFFERENCES (Callaway-Sant'Anna) ---
+  const handleRunStaggered = async () => {
+    if (!sdidId || !sdidTime || !sdidOutcome || !sdidGroup) return;
+    setSdidRunning(true);
+    setSdidError(null);
+    try {
+      const res = await runStaggeredDID({
+        data: dataset.data || [],
+        idVar: sdidId, timeVar: sdidTime, outcomeVar: sdidOutcome, groupVar: sdidGroup,
+        controlGroup: sdidControlGroup,
+      });
+      setSdidResult(res);
+      onRunComplete({
+        type: 'generic',
+        specification: `Staggered DiD (Callaway-Sant'Anna): ${sdidOutcome} ~ cohort(${sdidGroup})`,
+        results: res
+      });
+    } catch (err: any) {
+      setSdidError(`Estimation error: ${err.message || err}`);
+    } finally {
+      setSdidRunning(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-stone-200 pb-4">
@@ -562,6 +597,25 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
               DiD Specification
             </h3>
 
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setDidMode('simple')}
+                className={cn("p-2 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition",
+                  didMode === 'simple' ? 'border-[#1B2E41] bg-[#1B2E41]/5 text-[#1B2E41]' : 'border-stone-200 text-stone-500')}
+              >
+                Simple 2&times;2
+              </button>
+              <button
+                onClick={() => setDidMode('staggered')}
+                className={cn("p-2 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition",
+                  didMode === 'staggered' ? 'border-[#1B2E41] bg-[#1B2E41]/5 text-[#1B2E41]' : 'border-stone-200 text-stone-500')}
+              >
+                Staggered (CS)
+              </button>
+            </div>
+
+            {didMode === 'simple' && (
+            <>
             <div className="space-y-3">
               <div>
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Outcome variable (Y)</label>
@@ -659,10 +713,121 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                 </div>
               )}
             </div>
+            </>
+            )}
+
+            {didMode === 'staggered' && (
+            <div className="space-y-3">
+              <p className="text-[10px] text-stone-400 leading-relaxed">
+                Callaway-Sant'Anna estimator for staggered treatment timing (different units treated at different periods). Runs on the Python (csdid) engine &mdash; matches R's did package.
+              </p>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Unit ID variable</label>
+                <select value={sdidId} onChange={e => setSdidId(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="">Select variable...</option>
+                  {variables.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Time variable</label>
+                <select value={sdidTime} onChange={e => setSdidTime(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="">Select variable...</option>
+                  {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Outcome variable (Y)</label>
+                <select value={sdidOutcome} onChange={e => setSdidOutcome(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="">Select variable...</option>
+                  {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Cohort/Group variable</label>
+                <select value={sdidGroup} onChange={e => setSdidGroup(e.target.value)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="">Select variable...</option>
+                  {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+                <p className="text-[9px] text-stone-400 mt-1">The period each unit was first treated; 0 = never treated.</p>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Control Group</label>
+                <select value={sdidControlGroup} onChange={e => setSdidControlGroup(e.target.value as any)} className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800">
+                  <option value="nevertreated">Never-treated units</option>
+                  <option value="notyettreated">Not-yet-treated units</option>
+                </select>
+              </div>
+              <button
+                onClick={handleRunStaggered}
+                disabled={sdidRunning || !sdidId || !sdidTime || !sdidOutcome || !sdidGroup}
+                className="w-full py-2.5 bg-[#1B2E41] hover:bg-[#243D54] disabled:bg-stone-300 text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2"
+              >
+                {sdidRunning ? (
+                  <div className="flex items-center gap-2"><div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" /><span>Estimating ATT(g,t)...</span></div>
+                ) : (<>Run Staggered DiD <ArrowRight className="w-4 h-4" /></>)}
+              </button>
+              {sdidError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-[10px] font-medium flex items-start gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+                  <div><span className="font-bold block mb-0.5 uppercase tracking-widest text-[9px] text-red-800">Estimation Failed</span>{sdidError}</div>
+                </div>
+              )}
+            </div>
+            )}
           </div>
 
           <div className="lg:col-span-8 space-y-6">
-            {!didResult ? (
+            {didMode === 'staggered' ? (
+              !sdidResult ? (
+                <div className="p-12 text-center bg-stone-50 border border-stone-200 rounded-2xl h-full flex flex-col justify-center items-center">
+                  <GitCommit className="w-10 h-10 text-stone-300 mb-2" />
+                  <h4 className="text-sm font-bold text-stone-600">No Staggered DiD Run</h4>
+                  <p className="text-xs text-stone-400 font-serif italic max-w-sm mt-1">Specify the unit/time/outcome/cohort variables to estimate ATT(g,t) across treatment cohorts.</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <span className="inline-block text-[9px] font-mono font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5">Python / csdid (research-grade, matches R did)</span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Overall ATT (event-study avg)</span>
+                      <span className="text-xl font-serif font-bold text-[#1B2E41]">{fmt(sdidResult.dynamic?.overallATT)}</span>
+                    </div>
+                    <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Std Error</span>
+                      <span className="text-xl font-serif text-stone-800">{fmt(sdidResult.dynamic?.overallSE)}</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-stone-200 rounded-2xl p-6">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4">Event-Study: ATT by Relative Period</h3>
+                    <p className="text-[10px] text-stone-400 mb-3">Negative event-time = pre-treatment (should be near zero if parallel trends holds). e=0 is the treatment period.</p>
+                    <div className="overflow-x-auto">
+                      <table className="journal-table">
+                        <thead><tr><th>Event time (e)</th><th>ATT</th><th>Std Error</th></tr></thead>
+                        <tbody>
+                          {(sdidResult.dynamic?.eventTime || []).map((e: number, i: number) => (
+                            <tr key={e} className={e < 0 ? 'text-stone-400' : 'font-bold'}>
+                              <td className="font-mono text-xs">{e >= 0 ? `+${e}` : e}</td>
+                              <td className="text-right">{fmt(sdidResult.dynamic.att[i])}</td>
+                              <td className="text-right">{fmt(sdidResult.dynamic.se[i])}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-2">
+                    <h4 className="text-xs font-bold text-stone-800 uppercase tracking-wider flex items-center gap-2">
+                      <HelpCircle className="w-4 h-4 text-stone-600" /> Interpretation
+                    </h4>
+                    <p className="text-xs text-stone-600 leading-relaxed font-serif">
+                      Pre-treatment (e &lt; 0) coefficients near zero support the parallel-trends assumption. Post-treatment (e &ge; 0) coefficients are the treatment effect at each relative period since adoption, estimated separately for each cohort then averaged (doubly-robust estimator), avoiding the negative-weighting bias of naive two-way fixed-effects DiD under staggered timing.
+                    </p>
+                  </div>
+                </div>
+              )
+            ) : !didResult ? (
               <div className="p-12 text-center bg-stone-50 border border-stone-200 rounded-2xl h-full flex flex-col justify-center items-center">
                 <TrendingUp className="w-10 h-10 text-stone-300 mb-2" />
                 <h4 className="text-sm font-bold text-stone-600">No DiD Estimate Run</h4>

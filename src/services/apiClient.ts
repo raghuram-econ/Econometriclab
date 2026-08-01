@@ -211,6 +211,19 @@ export async function runSyntheticControl(payload: {
   return callBackendAPI('/api/python/synthetic-control', payload);
 }
 
+// Staggered-adoption Difference-in-Differences (Callaway-Sant'Anna) via
+// `csdid`, matching R's `did` package (att_gt + aggte).
+export async function runStaggeredDID(payload: {
+  data: any[];
+  idVar: string;
+  timeVar: string;
+  outcomeVar: string;
+  groupVar: string;
+  controlGroup?: 'nevertreated' | 'notyettreated';
+}): Promise<any> {
+  return callBackendAPI('/api/python/staggered-did', payload);
+}
+
 export async function runPower(payload: {
   design: 'ttest' | 'cluster-main' | 'cluster-interaction';
   solveFor?: 'n' | 'power' | 'mdes';

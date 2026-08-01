@@ -363,6 +363,7 @@ async function startServer() {
     "/api/python/rdd": "/python/rdd",
     "/api/python/power": "/python/power",
     "/api/python/synthetic-control": "/python/synthetic-control",
+    "/api/python/staggered-did": "/python/staggered-did",
   };
 
   app.post(Object.keys(PYTHON_JSON_ROUTES), async (req, res) => {
