@@ -14,6 +14,7 @@ import {
 import { runOLS } from '../../lib/econometrics/ols';
 import { runSharpRDD } from '../../lib/econometrics/rdd';
 import { runGMM, runRDDPy, runSyntheticControl, runStaggeredDID } from '../../services/apiClient';
+import { useStore } from '../../store/useStore';
 import { Dataset, AnalysisResult } from '../../types';
 import { cn, fmt, fmtP, stars } from '../../lib/utils';
 import jStat from 'jstat';
@@ -27,6 +28,7 @@ interface CausalLabProps {
 type TabType = 'did' | 'iv' | 'rd' | 'gmm' | 'synth';
 
 export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
+  const { setActiveModule } = useStore();
   const [activeTab, setActiveTab] = useState<TabType>('did');
 
   // Difference-in-Differences State
@@ -101,6 +103,12 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
         <p className="text-sm text-stone-500 font-serif italic max-w-md mx-auto mt-2">
           Please load an active dataset in the Data Workspace to begin testing causal designs.
         </p>
+        <button
+          onClick={() => setActiveModule('data')}
+          className="mt-5 px-5 py-2.5 bg-[#1B2E41] hover:bg-[#243D54] text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-colors inline-flex items-center gap-2"
+        >
+          Go to Data Workspace <ArrowRight className="w-4 h-4" />
+        </button>
       </div>
     );
   }

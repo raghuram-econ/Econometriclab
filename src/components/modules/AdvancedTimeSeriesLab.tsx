@@ -560,9 +560,17 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
 
           {activeTab === 'results' && results && (
             <div className="bg-white border border-stone-200 rounded-2xl p-8 shadow-sm space-y-6">
-              <h4 className="text-lg font-serif font-bold text-stone-900">
-                {results.type === 'var' ? 'Estimated VAR(1) Coefficient Matrices' : 'ARCH/GARCH Volatility Estimates'}
-              </h4>
+              <div className="flex items-start justify-between gap-4">
+                <h4 className="text-lg font-serif font-bold text-stone-900">
+                  {results.type === 'var' ? 'Estimated VAR(1) Coefficient Matrices' : 'ARCH/GARCH Volatility Estimates'}
+                </h4>
+                <button
+                  onClick={() => setActiveTab('estimation')}
+                  className="shrink-0 text-[10px] font-bold uppercase tracking-widest text-indigo-600 hover:text-indigo-800 flex items-center gap-1 whitespace-nowrap"
+                >
+                  <Binary className="w-3 h-3" /> Edit Specification / Change Engine
+                </button>
+              </div>
               {results.engine === 'python' && (
                 <span className="inline-block text-[9px] font-mono font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5">Python / arch (research-grade)</span>
               )}
