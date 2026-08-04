@@ -1,22 +1,25 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  Target, 
-  Info, 
-  AlertTriangle, 
-  ArrowRight, 
-  CheckCircle2, 
-  ShieldAlert, 
-  GitCommit, 
-  Binary, 
+import {
+  Target,
+  Info,
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  ShieldAlert,
+  GitCommit,
+  Binary,
   HelpCircle,
-  TrendingUp
+  TrendingUp,
+  Terminal,
+  Copy,
+  Check
 } from 'lucide-react';
 import { runOLS } from '../../lib/econometrics/ols';
 import { runSharpRDD } from '../../lib/econometrics/rdd';
 import { runGMM, runRDDPy, runSyntheticControl, runStaggeredDID } from '../../services/apiClient';
 import { useStore } from '../../store/useStore';
 import { Dataset, AnalysisResult } from '../../types';
-import { cn, fmt, fmtP, stars } from '../../lib/utils';
+import { cn, fmt, fmtP, stars, copyTextToClipboard } from '../../lib/utils';
 import jStat from 'jstat';
 import ShowCode from '../shared/ShowCode';
 
@@ -37,7 +40,9 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [didTreatment, setDidTreatment] = useState('');
   const [didTime, setDidTime] = useState('');
   const [didControls, setDidControls] = useState<string[]>([]);
+  const [didClusterVar, setDidClusterVar] = useState('');
   const [didResult, setDidResult] = useState<any | null>(null);
+  const [didCodeCopied, setDidCodeCopied] = useState<string | null>(null);
 
   // Staggered-adoption DiD state (Callaway-Sant'Anna, Python backend)
   const [sdidId, setSdidId] = useState('');
@@ -94,6 +99,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
 
   const variables = useMemo(() => dataset?.variables || [], [dataset]);
   const numericVars = useMemo(() => variables.filter(v => v.type === 'numeric'), [variables]);
+  const idVars = useMemo(() => variables.filter(v => v.type === 'categorical' || v.type === 'numeric'), [variables]);
 
   if (!dataset) {
     return (
@@ -156,7 +162,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
       }));
 
       const independentVars = [didTreatment, didTime, 'treated_post', ...didControls];
-      const olsResult = runOLS(regressionData, didOutcome, independentVars, true, true);
+      const olsResult = runOLS(regressionData, didOutcome, independentVars, true, true, didClusterVar || undefined);
 
       const formattedResult = {
         simpleATT,
@@ -172,6 +178,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
         didTreatment,
         didTime,
         didControls,
+        didClusterVar: didClusterVar || undefined,
         causalType: 'did'
       };
 
@@ -186,6 +193,58 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
     } finally {
       setIsEstimating(false);
     }
+  };
+
+  // Reproducibility code for the currently estimated Simple 2x2 DiD spec.
+  // Mirrors exactly what handleRunDiD computes: treated_post = D * Post,
+  // and clustering (when set) via the same cluster variable passed to runOLS.
+  const getDidCode = (lang: 'r' | 'stata' | 'python'): string => {
+    if (!didResult) return '';
+    const { didOutcome: y, didTreatment: d, didTime: t, didControls: controls, didClusterVar: cVar } = didResult;
+    const controlsSuffix = controls.length ? ` + ${controls.join(' + ')}` : '';
+
+    if (lang === 'stata') {
+      let code = `gen treated_post = ${d} * ${t}\n`;
+      code += `regress ${y} ${d} ${t} treated_post${controls.length ? ' ' + controls.join(' ') : ''}`;
+      code += cVar ? `, vce(cluster ${cVar})` : `, vce(robust)`;
+      return code;
+    }
+
+    if (lang === 'python') {
+      let code = `import statsmodels.api as sm\n\n`;
+      code += `df['treated_post'] = df['${d}'] * df['${t}']\n`;
+      code += `X = df[['${d}', '${t}', 'treated_post'${controls.map((c: string) => `, '${c}'`).join('')}]]\n`;
+      code += `X = sm.add_constant(X)\n\n`;
+      code += `model = sm.OLS(df['${y}'], X)\n`;
+      code += cVar
+        ? `results = model.fit(cov_type='cluster', cov_kwds={'groups': df['${cVar}']})`
+        : `results = model.fit(cov_type='HC1')`;
+      code += `\nprint(results.summary())`;
+      return code;
+    }
+
+    // R
+    let code = `df$treated_post <- df$${d} * df$${t}\n`;
+    code += `model <- lm(${y} ~ ${d} + ${t} + treated_post${controlsSuffix}, data = df)\n`;
+    if (cVar) {
+      code += `# Clustered standard errors by ${cVar}\n`;
+      code += `library(sandwich)\nlibrary(lmtest)\n`;
+      code += `coeftest(model, vcov = vcovCL(model, cluster = ~${cVar}))`;
+    } else {
+      code += `# Robust standard errors (White/HC1)\n`;
+      code += `library(sandwich)\nlibrary(lmtest)\n`;
+      code += `coeftest(model, vcov = vcovHC(model, type = "HC1"))`;
+    }
+    return code;
+  };
+
+  const handleCopyDidCode = (lang: 'r' | 'stata' | 'python') => {
+    copyTextToClipboard(getDidCode(lang)).then(success => {
+      if (success) {
+        setDidCodeCopied(lang);
+        setTimeout(() => setDidCodeCopied(null), 2000);
+      }
+    });
   };
 
   // --- INSTRUMENTAL VARIABLES 2SLS ---
@@ -692,6 +751,21 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                   ))}
                 </div>
               </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Cluster Variable (optional)</label>
+                <select
+                  value={didClusterVar}
+                  onChange={(e) => setDidClusterVar(e.target.value)}
+                  className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
+                >
+                  <option value="">None (HC1 robust SE)</option>
+                  {idVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                </select>
+                <p className="text-[9px] text-stone-400 mt-1 font-serif italic leading-relaxed">
+                  Recommended whenever your data has repeated observations per unit (e.g. entity/panel ID) — unclustered SEs are frequently invalid for DiD.
+                </p>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2">
@@ -880,7 +954,9 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
 
                 {/* Regression Result table */}
                 <div className="bg-white border border-stone-200 rounded-2xl p-6">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4">Regression Coefficient Matrix (HC1 Errors)</h3>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4">
+                    Regression Coefficient Matrix ({didResult.didClusterVar ? `Clustered by ${didResult.didClusterVar}` : 'HC1 Errors'})
+                  </h3>
                   <div className="overflow-x-auto">
                     <table className="journal-table">
                       <thead>
@@ -913,6 +989,36 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                         })}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+
+                {/* Reproducibility Code */}
+                <div className="bg-white border border-stone-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4 flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-stone-600" />
+                    Institutional Reproducibility Code
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {(['stata', 'r', 'python'] as const).map(lang => (
+                      <div key={lang} className="bg-slate-900 rounded-xl overflow-hidden border border-slate-800">
+                        <div className="px-4 py-2 bg-slate-800 flex items-center justify-between">
+                          <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">
+                            {lang === 'r' ? 'R (.R)' : lang === 'stata' ? 'Stata (.do)' : 'Python (.py)'}
+                          </span>
+                          <button
+                            onClick={() => handleCopyDidCode(lang)}
+                            className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                          >
+                            {didCodeCopied === lang ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                        <div className="p-4">
+                          <code className="text-[11px] font-mono text-slate-300 block whitespace-pre-wrap leading-relaxed">
+                            {getDidCode(lang)}
+                          </code>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
