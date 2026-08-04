@@ -37,7 +37,9 @@ export const CodeBridge: React.FC<CodeBridgeProps> = ({ modelType, yVar, xVars, 
         else if (options?.robust) cmd += `, vce(robust)`;
         return cmd;
       case 'fe':
-        return `xtset ${options?.entity} ${options?.time}\nxtreg ${yVar} ${xVars.join(' ')}, fe`;
+        let feCmd = `xtset ${options?.entity} ${options?.time}\nxtreg ${yVar} ${xVars.join(' ')}, fe`;
+        if (options?.cluster) feCmd += ` vce(cluster ${options.cluster})`;
+        return feCmd;
       case 'arima':
         const [p, d, q] = options?.orders || [1, 1, 1];
         return `arima ${yVar}, arima(${p},${d},${q})`;
@@ -57,7 +59,8 @@ export const CodeBridge: React.FC<CodeBridgeProps> = ({ modelType, yVar, xVars, 
         }
         return cmd;
       case 'fe':
-        return `library(fixest)\nfe_model <- feols(${yVar} ~ ${xVars.join(' + ')} | ${options?.entity}, data = df)`;
+        const vcovArg = options?.cluster ? `, vcov = ~${options.cluster}` : `, vcov = "iid"`;
+        return `library(fixest)\nfe_model <- feols(${yVar} ~ ${xVars.join(' + ')} | ${options?.entity}, data = df${vcovArg})`;
       case 'arima':
         const [p, d, q] = options?.orders || [1, 1, 1];
         return `library(forecast)\narima_model <- Arima(df$${yVar}, order = c(${p},${d},${q}))`;
@@ -77,7 +80,8 @@ export const CodeBridge: React.FC<CodeBridgeProps> = ({ modelType, yVar, xVars, 
         code += `\nprint(results.summary())`;
         return code;
       case 'fe':
-        return `from linearmodels import PanelOLS\n\n# Entity and Time indices must be set\ndf = df.set_index(['${options?.entity}', '${options?.time}'])\nmodel = PanelOLS(df['${yVar}'], df[[${xVars.map(v => `'${v}'`).join(', ')}]], entity_effects=True)\nresults = model.fit()\nprint(results)`;
+        const fitArgs = options?.cluster ? `cov_type='clustered', cluster_entity=True` : `cov_type='unadjusted'`;
+        return `from linearmodels import PanelOLS\n\n# Entity and Time indices must be set\ndf = df.set_index(['${options?.entity}', '${options?.time}'])\nmodel = PanelOLS(df['${yVar}'], df[[${xVars.map(v => `'${v}'`).join(', ')}]], entity_effects=True)\nresults = model.fit(${fitArgs})\nprint(results)`;
       case 'arima':
         const [p, d, q] = options?.orders || [1, 1, 1];
         return `from statsmodels.tsa.arima.model import ARIMA\n\nmodel = ARIMA(df['${yVar}'], order=(${p}, ${d}, ${q}))\nresults = model.fit()\nprint(results.summary())`;

@@ -936,6 +936,9 @@ export function estimateModel(
       stars: interceptStars
     });
 
+    const aic = n * Math.log(rss / n) + 2 * (k + entities.length);
+    const bic = n * Math.log(rss / n) + (k + entities.length) * Math.log(n);
+
     return {
       coefficients,
       rSquared,
@@ -944,7 +947,10 @@ export function estimateModel(
       df,
       rmse,
       rss,
-      isRobust: false,
+      aic,
+      bic,
+      isRobust: !!clusterVar,
+      seType: clusterVar ? 'Clustered SE' : 'Classical SE',
       residuals,
       droppedVariables: droppedFE
     };

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { runOLS } from '../../lib/econometrics/ols';
 import { runFixedEffects, runRandomEffects } from '../../lib/econometrics/fixed_effects';
+import { estimateModel } from '../../lib/econometrics/estimators';
 import { useStore } from '../../store/useStore';
 import { sanitizeMath } from '../../lib/sanitizeMath';
 import jStat from 'jstat';
@@ -197,48 +198,89 @@ export default function RegressionResultsTable({
       .filter((name: string) => name !== dependentVar);
   };
 
-  // SE type change re-estimates all OLS columns in-place
+  // SE type change re-estimates all OLS/Panel FE columns in-place
   const handleSETypeChange = (newSeType: string) => {
     if (!currentDataset || !currentDataset.data) {
       addToast('error', 'Dataset is missing or corrupted. Standard errors cannot be updated.');
       return;
     }
     const dataRows = currentDataset.data;
+    let touchedCount = 0;
+    let skippedHcForPanel = false;
 
     const updatedSpecs = specs.map(spec => {
-      // Re-estimate OLS specifications in place with the selected SE correction
-      if (spec.modelType !== 'ols') return spec;
+      if (spec.modelType === 'ols') {
+        const isRobust = newSeType !== 'None' && newSeType !== 'Classical';
+        const rType = (newSeType === 'Cluster' || newSeType === 'None' || newSeType === 'Classical') ? 'HC1' : newSeType;
+        const cVar = newSeType === 'Cluster' ? (spec.options?.clusterVar || entityId || 'id') : undefined;
 
-      const isRobust = newSeType !== 'None' && newSeType !== 'Classical';
-      const rType = (newSeType === 'Cluster' || newSeType === 'None' || newSeType === 'Classical') ? 'HC1' : newSeType;
-      const cVar = newSeType === 'Cluster' ? (spec.options?.clusterVar || entityId || 'id') : undefined;
+        const newResults = runOLS(
+          dataRows,
+          spec.dependentVar,
+          spec.xVariables,
+          true,
+          isRobust,
+          cVar,
+          false,
+          true,
+          rType as any
+        );
 
-      const newResults = runOLS(
-        dataRows,
-        spec.dependentVar,
-        spec.xVariables,
-        true,
-        isRobust,
-        cVar,
-        false,
-        true,
-        rType as any
-      );
+        touchedCount++;
+        return {
+          ...spec,
+          results: newResults,
+          options: {
+            ...spec.options,
+            robust: isRobust,
+            seType: newSeType,
+            clusterVar: cVar
+          }
+        };
+      }
 
-      return {
-        ...spec,
-        results: newResults,
-        options: {
-          ...spec.options,
-          robust: isRobust,
-          seType: newSeType,
-          clusterVar: cVar
+      if (spec.modelType === 'panel_fe') {
+        // Panel FE only supports Classical or Clustered SE (no HC0-3 sandwich variants).
+        if (newSeType !== 'Classical' && newSeType !== 'None' && newSeType !== 'Cluster') {
+          skippedHcForPanel = true;
+          return spec;
         }
-      };
+        const cVar = newSeType === 'Cluster' ? (spec.options?.clusterVar || entityId || 'id') : undefined;
+        const panelId = spec.options?.panelId || entityId || 'id';
+
+        const newResults = estimateModel('Panel FE', {
+          data: dataRows,
+          yVar: spec.dependentVar,
+          xVars: spec.xVariables,
+          entityVar: panelId,
+          clusterVar: cVar
+        });
+
+        touchedCount++;
+        return {
+          ...spec,
+          results: newResults,
+          options: {
+            ...spec.options,
+            seType: newSeType,
+            clusterVar: cVar
+          }
+        };
+      }
+
+      // Panel RE and other model types don't support in-place SE switching yet.
+      return spec;
     });
 
     setSpecs(updatedSpecs);
-    addToast('success', `Standard error correction successfully switched to ${newSeType.toUpperCase()} in-place.`);
+
+    if (touchedCount > 0) {
+      addToast('success', `Standard error correction successfully switched to ${newSeType.toUpperCase()} in-place.`);
+    } else if (skippedHcForPanel) {
+      addToast('error', 'Panel FE only supports Classical or Clustered standard errors, not HC0-3 sandwich variants.');
+    } else {
+      addToast('error', 'This model type does not support in-place standard error switching.');
+    }
   };
 
   // Dialog Add Specification Form Trigger
@@ -548,10 +590,16 @@ export default function RegressionResultsTable({
     specs.forEach((spec, idx) => {
       code += `# --- Estimation of Model (${idx + 1}) ---\n`;
       const formula = `${dependentVar} ~ ${spec.xVariables.join(' + ')}`;
+      const panelIdVar = spec.options?.panelId || entityId || 'id';
+      const panelTimeVar = spec.options?.timeId || timeId || 'year';
       if (spec.modelType === 'panel_fe') {
-        code += `model_${idx + 1} <- plm(${formula}, data = df, index = c("${entityId || 'id'}", "${timeId || 'year'}"), model = "within")\n`;
+        code += `model_${idx + 1} <- plm(${formula}, data = df, index = c("${panelIdVar}", "${panelTimeVar}"), model = "within")\n`;
+        if (spec.options?.clusterVar) {
+          code += `# Clustered standard errors by ${spec.options.clusterVar}\n`;
+          code += `coeftest(model_${idx + 1}, vcov = plm::vcovHC(model_${idx + 1}, cluster = "group"))\n`;
+        }
       } else if (spec.modelType === 'panel_re') {
-        code += `model_${idx + 1} <- plm(${formula}, data = df, index = c("${entityId || 'id'}", "${timeId || 'year'}"), model = "random")\n`;
+        code += `model_${idx + 1} <- plm(${formula}, data = df, index = c("${panelIdVar}", "${panelTimeVar}"), model = "random")\n`;
       } else {
         code += `model_${idx + 1} <- lm(${formula}, data = df)\n`;
         if (spec.options?.clusterVar) {

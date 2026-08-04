@@ -14,6 +14,7 @@ import { useStore } from '../../store/useStore';
 import { useNavigation } from '../../hooks/useNavigation';
 import { CodeBridge } from '../shared/CodeBridge';
 import RegressionResultsTable from '../shared/RegressionResultsTable';
+import { estimateModel } from '../../lib/econometrics/estimators';
 
 import { formatNum, formatPValue } from '../../lib/formatters';
 
@@ -90,6 +91,7 @@ export default function FELab({ dataset, onRunComplete, isLoading }: FELabProps)
 
   const [activeHelp, setActiveHelp] = useState<"entity" | "time" | "transformation" | "dependent" | "regressors" | null>(null);
   const [showExplanation, setShowExplanation] = useState<boolean>(false);
+  const [clusterSE, setClusterSE] = useState<boolean>(false);
 
   useEffect(() => {
     setShowExplanation(false);
@@ -232,6 +234,28 @@ export default function FELab({ dataset, onRunComplete, isLoading }: FELabProps)
     setEstimationError(null);
 
     try {
+      // Clustered-SE Fixed Effects runs client-side, since the server-side FE
+      // engine (fixed_effects.ts) has no cluster-robust SE support. This reuses
+      // the already-verified Panel FE + cluster engine from estimators.ts
+      // (see golden.test.ts: grunfeld_fe_clustered, and r_verification/02_panel_fe_re.R).
+      if (modelType === 'fe' && clusterSE) {
+        const res = estimateModel('Panel FE', {
+          data: dataset.data,
+          yVar,
+          xVars,
+          entityVar: panelConfig.entityId,
+          clusterVar: panelConfig.entityId
+        });
+        setResults(res);
+        const spec = `FE Model: ${yVar} ~ ${(xVars || []).join(' + ')} (Entity: ${panelConfig.entityId || 'N/A'}, Time: ${panelConfig.timeVar || 'N/A'}, Clustered SE by ${panelConfig.entityId})`;
+        onRunComplete(res, spec);
+        if (teachingState.isActive) {
+          updateTeachingStep('Run panel model');
+        }
+        setIsEstimating(false);
+        return;
+      }
+
       const headers = await getAuthHeaders();
       let response;
       if (modelType === 'fe') {
@@ -457,6 +481,21 @@ export default function FELab({ dataset, onRunComplete, isLoading }: FELabProps)
                <p className="text-[9px] text-stone-400 mt-2 font-serif italic text-center leading-relaxed">
                  {modelType === 'fe' ? 'Eliminates time-invariant cross-sectional bias.' : 'Assumes no unobserved individual effects.'}
                </p>
+               {modelType === 'fe' && (
+                 <label className="mt-4 flex items-start gap-2 cursor-pointer">
+                   <input
+                     id="fe-cluster-se-checkbox"
+                     type="checkbox"
+                     checked={clusterSE}
+                     onChange={(e) => setClusterSE(e.target.checked)}
+                     className="mt-0.5 w-3.5 h-3.5 rounded border-stone-300 text-stone-900 focus:ring-stone-500/20"
+                   />
+                   <span className="text-[10px] text-stone-600 leading-relaxed">
+                     <span className="font-bold">Cluster-robust SE</span> (by {panelConfig.entityId || 'entity'})
+                     <span className="block text-[9px] text-stone-400 mt-0.5">Recommended whenever regressors are correlated within entities over time.</span>
+                   </span>
+                 </label>
+               )}
             </div>
 
             <div className="pt-6 border-t border-stone-100">
@@ -601,14 +640,15 @@ export default function FELab({ dataset, onRunComplete, isLoading }: FELabProps)
                       </button>
                     </div>
 
-                    <RegressionResultsTable 
-                      results={results} 
-                      dependentVar={yVar} 
+                    <RegressionResultsTable
+                      results={results}
+                      dependentVar={yVar}
                       modelType={modelType === 'fe' ? 'panel_fe' : 'panel_re'}
                       xVariables={xVars}
                       options={{
                         panelId: panelConfig.entityId,
-                        timeId: panelConfig.timeVar
+                        timeId: panelConfig.timeVar,
+                        clusterVar: modelType === 'fe' && clusterSE ? panelConfig.entityId : undefined
                       }}
                     />
                  </div>
@@ -634,13 +674,14 @@ export default function FELab({ dataset, onRunComplete, isLoading }: FELabProps)
                       modelType={modelType === 'fe' ? 'FE' : 'OLS'}
                     />
                     <div className="pt-6 border-t border-stone-100">
-                      <CodeBridge 
+                      <CodeBridge
                         modelType={modelType === 'fe' ? 'fe' : 'ols'}
                         yVar={yVar}
                         xVars={xVars}
                         options={{
                           entity: panelConfig.entityId,
-                          time: panelConfig.timeVar
+                          time: panelConfig.timeVar,
+                          cluster: modelType === 'fe' && clusterSE ? panelConfig.entityId : undefined
                         }}
                       />
                     </div>
