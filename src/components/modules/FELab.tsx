@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Play, Layers, FlaskConical, CheckCircle2, FileDown, Info, X, HelpCircle, Check, ChevronRight, Sparkles, Database, Upload, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dataset, RegressionResult, PanelConfig } from '../../types';
@@ -99,6 +99,25 @@ export default function FELab({ dataset, onRunComplete, isLoading }: FELabProps)
 
   const panelConfig = { entityId, timeVar: timeId };
   const [results, setResults] = useState<RegressionResult | null>(null);
+
+  // Memoized so these keep a stable reference across unrelated re-renders
+  // (e.g. toasts, autosave ticks) -- RegressionResultsTable resets its
+  // in-memory "Add Specification" comparison columns whenever this object's
+  // reference changes, so a fresh literal here would silently wipe user work.
+  const resultsTableClusterVar = modelType === 'fe' && clusterSE ? entityId : undefined;
+  const resultsTableOptions = useMemo(() => ({
+    panelId: entityId,
+    timeId: timeId,
+    clusterVar: resultsTableClusterVar
+  }), [entityId, timeId, resultsTableClusterVar]);
+
+  const codeBridgeClusterOption = modelType === 'fe' && clusterSE ? entityId : undefined;
+  const codeBridgeOptions = useMemo(() => ({
+    entity: entityId,
+    time: timeId,
+    cluster: codeBridgeClusterOption
+  }), [entityId, timeId, codeBridgeClusterOption]);
+
   const [activeStep, setActiveStep] = useState<'estimation' | 'diagnostics' | 'interpretation'>('estimation');
   const [mistakes, setMistakes] = useState<Mistake[]>([]);
   const [isEstimating, setIsEstimating] = useState(false);
@@ -645,11 +664,7 @@ export default function FELab({ dataset, onRunComplete, isLoading }: FELabProps)
                       dependentVar={yVar}
                       modelType={modelType === 'fe' ? 'panel_fe' : 'panel_re'}
                       xVariables={xVars}
-                      options={{
-                        panelId: panelConfig.entityId,
-                        timeId: panelConfig.timeVar,
-                        clusterVar: modelType === 'fe' && clusterSE ? panelConfig.entityId : undefined
-                      }}
+                      options={resultsTableOptions}
                     />
                  </div>
                )}
@@ -678,11 +693,7 @@ export default function FELab({ dataset, onRunComplete, isLoading }: FELabProps)
                         modelType={modelType === 'fe' ? 'fe' : 'ols'}
                         yVar={yVar}
                         xVars={xVars}
-                        options={{
-                          entity: panelConfig.entityId,
-                          time: panelConfig.timeVar,
-                          cluster: modelType === 'fe' && clusterSE ? panelConfig.entityId : undefined
-                        }}
+                        options={codeBridgeOptions}
                       />
                     </div>
                  </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Play, BookOpen, Binary, ShieldCheck, Code, ArrowRight, Laptop, FlaskConical, Info, X, HelpCircle, Check, ChevronRight, Sparkles, AlertCircle, Plus, Scale } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../../store/useStore';
@@ -79,6 +79,23 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
   const [useWildBootstrap, setUseWildBootstrap] = useState<boolean>(false);
   const [wildBootstrapB, setWildBootstrapB] = useState<number>(999);
   const useRobust = seEstimator !== 'None';
+
+  // Memoized so these keep a stable reference across unrelated re-renders
+  // (e.g. toasts, autosave ticks) -- RegressionResultsTable resets its
+  // in-memory "Add Specification" comparison columns whenever this object's
+  // reference changes, so a fresh literal here would silently wipe user work.
+  const resultsTableClusterVar = seEstimator === 'Cluster' ? clusterVar : undefined;
+  const resultsTableOptions = useMemo(() => ({
+    robust: useRobust,
+    clusterVar: resultsTableClusterVar,
+    seType: seEstimator
+  }), [useRobust, resultsTableClusterVar, seEstimator]);
+
+  const codeBridgeOptions = useMemo(() => ({
+    robust: useRobust,
+    cluster: resultsTableClusterVar
+  }), [useRobust, resultsTableClusterVar]);
+
   const [estimationResults, setEstimationResults] = useState<any>(null);
   const [isEstimating, setIsEstimating] = useState(false);
   const [regressionMode, setRegressionMode] = useState<'ols' | 'quantile'>('ols');
@@ -882,17 +899,13 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
             </span>
           </div>
           
-          <RegressionResultsTable 
-            results={estimationResults} 
-            dependentVar={dependentVar} 
-            variableMetadata={variableMetadata} 
+          <RegressionResultsTable
+            results={estimationResults}
+            dependentVar={dependentVar}
+            variableMetadata={variableMetadata}
             modelType="ols"
             xVariables={independentVars}
-            options={{
-              robust: useRobust,
-              clusterVar: seEstimator === 'Cluster' ? clusterVar : undefined,
-              seType: seEstimator
-            }}
+            options={resultsTableOptions}
           />
 
           {/* Collapsible Hypothesis Tests Panel */}
@@ -957,14 +970,11 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
                 <Code className="w-5 h-5 text-indigo-500" />
                 <h4 className="text-sm font-bold uppercase tracking-tight text-slate-900">Institutional Reproducibility Code</h4>
              </div>
-             <CodeBridge 
+             <CodeBridge
                 modelType="ols"
                 yVar={dependentVar}
                 xVars={independentVars}
-                options={{
-                  robust: useRobust,
-                  cluster: seEstimator === 'Cluster' ? clusterVar : undefined
-                }}
+                options={codeBridgeOptions}
              />
           </section>
         </section>
