@@ -655,6 +655,11 @@ class GMMRequest(BaseModel):
     timeVar: str
     depVar: str
     instruments: List[str]
+    # Display-only: human-readable variable names in the same column order as
+    # `data` when it's sent as an array-of-arrays (depVar/instruments are then
+    # positional indices, not names -- this lets coefficient labels show the
+    # real variable instead of its raw index).
+    columnNames: Optional[List[str]] = None
 
 @app.post("/python/gmm")
 def run_gmm(req: GMMRequest):
@@ -725,11 +730,19 @@ def run_gmm(req: GMMRequest):
         mod = IVGMM(y_dep, exog, endog, instr)
         res = mod.fit()
         
+        # Resolve display names: when columns were sent positionally (array-of-
+        # arrays), dep_col/instr_cols are raw indices -- use columnNames to show
+        # the actual variable instead of e.g. "L1.(2)".
+        def _display(col):
+            if req.columnNames and isinstance(col, int) and 0 <= col < len(req.columnNames):
+                return req.columnNames[col]
+            return col
+
         coef_rows = []
-        name_map = {'const': 'Constant (Trend)', 'dy_lag1': f'Lagged Dependent Variable L1.({dep_col})'}
+        name_map = {'const': 'Constant (Trend)', 'dy_lag1': f'Lagged Dependent Variable L1.({_display(dep_col)})'}
         for col in instr_cols:
             if col != dep_col:
-                name_map[f"d_{col}"] = f"Diff.{col}"
+                name_map[f"d_{col}"] = f"Diff.{_display(col)}"
                 
         for name in res.params.index:
             display_name = name_map.get(str(name), str(name))

@@ -134,6 +134,7 @@ export async function runGMM(payload: {
   timeVar: string;
   depVar: string;
   instruments: string[];
+  columnNames?: string[];
 }): Promise<any> {
   return callBackendAPI('/api/python/gmm', payload);
 }

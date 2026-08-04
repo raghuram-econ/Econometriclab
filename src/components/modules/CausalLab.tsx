@@ -470,6 +470,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
         timeVar: '1',
         depVar: '2',
         instruments: gmmInstruments.map((_, i) => String(3 + i)),
+        columnNames: cols,
       });
       setGmmResult({ ...res, gmmDep, gmmEntity, gmmTime });
       onRunComplete({
