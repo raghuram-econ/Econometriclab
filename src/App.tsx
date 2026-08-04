@@ -1073,7 +1073,7 @@ export default function App() {
             </div>
 
             <div className="border-t border-stone-200 pt-4 text-[9px] text-stone-400 font-mono flex justify-between items-center">
-              <span>AEA Compendium Repository: https://econometricslab.app</span>
+              <span>AEA Compendium Repository: https://econometrics-lab.onrender.com</span>
               <span>Compiled: {new Date().toLocaleTimeString()}</span>
             </div>
           </div>
@@ -1298,7 +1298,7 @@ export default function App() {
 
           {/* Bottom Footnote */}
           <div className="border-t border-stone-200 pt-4 text-[9px] text-stone-400 font-mono flex justify-between items-center">
-            <span>AEA Compendium Repository: https://econometricslab.app</span>
+            <span>AEA Compendium Repository: https://econometrics-lab.onrender.com</span>
             <span>Secure Verification Index: {activeRun?.id || "N/A"}</span>
           </div>
         </div>

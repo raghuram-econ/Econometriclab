@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 Disallow: /api/
-Sitemap: https://econometricslab.app/sitemap.xml
+Sitemap: https://econometrics-lab.onrender.com/sitemap.xml
