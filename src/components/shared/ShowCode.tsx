@@ -141,7 +141,7 @@ use "your_data.dta", clear
 
 * 2. Run Two-Stage Least Squares (2SLS) IV model
 * Syntax: ivregress 2sls depvar (endog_var = instrument) exogenous_controls
-ivregress 2sls ${y} (${endog} = ${instr}) ${controls}, robust`;
+ivregress 2sls ${y} (${endog} = ${instr}) ${controls}${vceOption}`;
 
       case 'arima':
         const [p, d, q] = orders;
@@ -240,10 +240,11 @@ model <- plm(${y} ~ ${xFormula}, data = data, index = c("${panelId}", "${timeId}
 # 4. Display coefficients and fit metrics
 summary(model)`;
 
-      case 'iv':
+      case 'iv': {
         const endog = xVars[0] || 'endogenous_x';
         const controls = xVars.slice(1).length > 0 ? xVars.slice(1).join(' + ') : '1';
         const instr = instruments.join(' + ');
+        const ivVcov = clusterVar ? `, vcov = ~${clusterVar}` : robust ? `, vcov = "HC1"` : `, vcov = "iid"`;
         return `# 1. Load fixest package for 2SLS IV support
 library(fixest)
 
@@ -252,10 +253,11 @@ data <- read.csv("your_data.csv")
 
 # 3. Run Instrumental Variables (IV) 2SLS
 # Syntax: feols(y ~ exogenous_controls | endogenous_var ~ instruments, data)
-model <- feols(${y} ~ ${controls} | ${endog} ~ ${instr}, data = data)
+model <- feols(${y} ~ ${controls} | ${endog} ~ ${instr}, data = data${ivVcov})
 
 # 4. Print summary
 summary(model)`;
+      }
 
       case 'arima':
         const [p, d, q] = orders;
@@ -393,11 +395,16 @@ results = model.fit()
 # 4. Show RE summary
 print(results.summary)`;
 
-      case 'iv':
+      case 'iv': {
         const endog = xVars[0] || 'endogenous_x';
         const controls = xVars.slice(1);
         const controlsList = controls.map(v => `'${v}'`).join(', ');
         const instrList = instruments.map(v => `'${v}'`).join(', ');
+        const ivCovType = clusterVar
+          ? `cov_type='clustered', clusters=df['${clusterVar}']`
+          : robust
+          ? `cov_type='robust'`
+          : `cov_type='unadjusted'`;
         return `# 1. Load instrumental variables module
 import pandas as pd
 from linearmodels.iv import IV2SLS
@@ -413,10 +420,11 @@ endog_var = df['${endog}']
 instruments_var = df[[${instrList}]]
 
 model = IV2SLS(dep, exog, endog_var, instruments_var)
-results = model.fit(cov_type='robust')
+results = model.fit(${ivCovType})
 
 # 4. Review 2SLS statistics and Overidentification tests
 print(results.summary)`;
+      }
 
       case 'arima':
         const [pa, da, qa] = orders;

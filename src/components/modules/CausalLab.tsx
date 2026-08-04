@@ -256,8 +256,11 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
       const data = dataset.data || [];
 
       // First stage: Endogenous (X) ~ Instrument (Z) + Controls
+      // (robust/classical doesn't matter here -- only point estimates from this
+      // stage are used downstream, to build x_hat; the F-stat used for the weak
+      // instrument check is a classical F regardless of this flag)
       const firstStageXvars = [ivInstrument, ...ivControls];
-      const firstStage = runOLS(data, ivEndogenous, firstStageXvars, true, true);
+      const firstStage = runOLS(data, ivEndogenous, firstStageXvars, true, false);
 
       // Weak instrument check: first stage F-statistic
       const firstStageF = firstStage.fStat || 0;
@@ -280,8 +283,15 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
       });
 
       // Second stage: Outcome (Y) ~ x_hat + Controls
+      // NOTE: this must be classical (not robust=true) -- the seScale correction
+      // below rescales this naive SE by sqrt(rssTrue / secondStageRSS), which is
+      // only a mathematically valid derivation for the classical/homoskedastic
+      // variance formula (sigma^2 * (X'X)^-1). Applying the same scalar rescale
+      // to an HC1 sandwich SE produces an invalid hybrid that matches neither
+      // classical nor robust reference values (confirmed by comparing against
+      // linearmodels IV2SLS with cov_type='unadjusted' vs 'robust').
       const secondStageXvars = ['x_hat', ...ivControls];
-      const secondStage = runOLS(fittedData, ivOutcome, secondStageXvars, true, true);
+      const secondStage = runOLS(fittedData, ivOutcome, secondStageXvars, true, false);
 
       // Filter data to get exact observations used in second stage regression
       const varsToObserve = [ivOutcome, ivEndogenous, ivInstrument, ...ivControls];
@@ -1177,7 +1187,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
 
                 {/* Second Stage Results */}
                 <div className="bg-white border border-stone-200 rounded-2xl p-6">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4">Second Stage Coefficient Matrix (IV-2SLS)</h3>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4">Second Stage Coefficient Matrix (IV-2SLS, Classical SE)</h3>
                   <div className="overflow-x-auto">
                     <table className="journal-table">
                       <thead>
