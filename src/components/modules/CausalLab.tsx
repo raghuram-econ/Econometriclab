@@ -15,6 +15,7 @@ import {
   Check
 } from 'lucide-react';
 import { runOLS } from '../../lib/econometrics/ols';
+import { estimateModel } from '../../lib/econometrics/estimators';
 import { runSharpRDD } from '../../lib/econometrics/rdd';
 import { runGMM, runRDDPy, runSyntheticControl, runStaggeredDID } from '../../services/apiClient';
 import { useStore } from '../../store/useStore';
@@ -255,110 +256,37 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
     try {
       const data = dataset.data || [];
 
-      // First stage: Endogenous (X) ~ Instrument (Z) + Controls
-      // (robust/classical doesn't matter here -- only point estimates from this
-      // stage are used downstream, to build x_hat; the F-stat used for the weak
-      // instrument check is a classical F regardless of this flag)
+      // First stage: Endogenous (X) ~ Instrument (Z) + Controls.
+      // This is purely diagnostic here -- only the F-statistic is used, to
+      // drive the weak-instrument warning below. Point estimates come from
+      // estimateModel('IV', ...) instead, which runs its own internal 2SLS
+      // (verified against Python linearmodels.IV2SLS to <0.01% relative
+      // error on coefficients, <0.1% on SEs -- see reference.test.ts).
       const firstStageXvars = [ivInstrument, ...ivControls];
       const firstStage = runOLS(data, ivEndogenous, firstStageXvars, true, false);
-
-      // Weak instrument check: first stage F-statistic
       const firstStageF = firstStage.fStat || 0;
       const isWeak = firstStageF < 10;
 
-      // Predict X (fitted values)
-      const fittedData = data.map(row => {
-        let xHat = 0;
-        firstStage.coefficients.forEach(coef => {
-          if (coef.variable === 'Intercept') {
-            xHat += coef.estimate;
-          } else {
-            xHat += coef.estimate * (Number(row[coef.variable]) || 0);
-          }
-        });
-        return {
-          ...row,
-          x_hat: xHat
-        };
+      const secondStage = estimateModel('IV', {
+        data,
+        yVar: ivOutcome,
+        xVars: ivControls,
+        endogenousVar: ivEndogenous,
+        instruments: [ivInstrument],
       });
 
-      // Second stage: Outcome (Y) ~ x_hat + Controls
-      // NOTE: this must be classical (not robust=true) -- the seScale correction
-      // below rescales this naive SE by sqrt(rssTrue / secondStageRSS), which is
-      // only a mathematically valid derivation for the classical/homoskedastic
-      // variance formula (sigma^2 * (X'X)^-1). Applying the same scalar rescale
-      // to an HC1 sandwich SE produces an invalid hybrid that matches neither
-      // classical nor robust reference values (confirmed by comparing against
-      // linearmodels IV2SLS with cov_type='unadjusted' vs 'robust').
-      const secondStageXvars = ['x_hat', ...ivControls];
-      const secondStage = runOLS(fittedData, ivOutcome, secondStageXvars, true, false);
-
-      // Filter data to get exact observations used in second stage regression
-      const varsToObserve = [ivOutcome, ivEndogenous, ivInstrument, ...ivControls];
-      const validRows = data.filter(row => {
-        if (!row) return false;
-        return varsToObserve.every(v => {
-          const val = row[v];
-          return val !== undefined && val !== null && !isNaN(parseFloat(val));
-        });
-      });
-
-      // Recompute true residual sum of squares using actual endogenous variable
-      const rssTrue = validRows.reduce((sum, row) => {
-        let yHatTrue = 0;
-        secondStage.coefficients.forEach(coef => {
-          if (coef.variable === 'Intercept') {
-            yHatTrue += coef.estimate;
-          } else if (coef.variable === 'x_hat') {
-            yHatTrue += coef.estimate * (Number(row[ivEndogenous]) || 0);
-          } else {
-            yHatTrue += coef.estimate * (Number(row[coef.variable]) || 0);
-          }
-        });
-        const yActual = Number(row[ivOutcome]) || 0;
-        const residual = yActual - yHatTrue;
-        return sum + residual * residual;
-      }, 0);
-
-      const secondStageRSS = secondStage.rss ?? 0;
-      const seScale = secondStageRSS > 0 ? Math.sqrt(rssTrue / secondStageRSS) : 1;
-      const correctedRMSE = Math.sqrt(rssTrue / secondStage.df);
-
-      // Map coefficients to label 'x_hat' as Instrumented Endogenous, applying SE corrections
-      const mappedCoefficients = secondStage.coefficients.map(c => {
-        const originalSE = c.stdError || 0;
-        const correctedSE = originalSE * seScale;
-        const correctedTStat = correctedSE === 0 ? NaN : c.estimate / correctedSE;
-        
-        const df = secondStage.df;
-        const correctedPValue = isNaN(correctedTStat) 
-          ? NaN 
-          : 2 * (1 - jStat.studentt.cdf(Math.abs(correctedTStat), df));
-          
-        const tCrit = jStat.studentt.inv(0.975, df);
-        const correctedConfLow = c.estimate - tCrit * correctedSE;
-        const correctedConfHigh = c.estimate + tCrit * correctedSE;
-
-        const isXHat = c.variable === 'x_hat';
-        const label = isXHat ? `${ivEndogenous} (Instrumented)` : c.variable;
-
-        return {
-          ...c,
-          variable: label,
-          stdError: isNaN(correctedSE) ? 0 : correctedSE,
-          tStat: isNaN(correctedTStat) ? 0 : correctedTStat,
-          pValue: isNaN(correctedPValue) ? 1 : correctedPValue,
-          confLow: isNaN(correctedSE) ? 0 : correctedConfLow,
-          confHigh: isNaN(correctedSE) ? 0 : correctedConfHigh
-        };
-      });
+      // Relabel the endogenous coefficient to flag it as instrumented, matching
+      // the previous UI convention (styled row + weak-instrument cross-reference).
+      const mappedCoefficients = secondStage.coefficients.map(c =>
+        c.variable === ivEndogenous
+          ? { ...c, variable: `${ivEndogenous} (Instrumented)` }
+          : c
+      );
 
       const formattedResult = {
         firstStage,
         secondStage: {
           ...secondStage,
-          rss: rssTrue,
-          rmse: correctedRMSE,
           coefficients: mappedCoefficients
         },
         firstStageF,

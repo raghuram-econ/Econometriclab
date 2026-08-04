@@ -25,16 +25,17 @@ Python-based verification already in `src/lib/econometrics/__tests__/`.
 | `07_quantile_regression.R` | Quantile regression | `engel.csv` | `quantreg` |
 | `08_synthetic_control.R` | Synthetic Control | `synthetic_control_panel.csv` | `Synth` |
 | `09_staggered_did.R` | Staggered DiD (Callaway-Sant'Anna) | `staggered_did_panel.csv` | `did` |
+| `10_iv_2sls.R` | IV / 2SLS | `mroz_iv.csv` | `AER::ivreg` |
 
 ## How to use the output
 
 Each script prints its own R results **and** the expected values as comments.
-For scripts 01–07 those comments are copied directly from
+For scripts 01–07 and 10 those comments are copied directly from
 `src/lib/econometrics/__tests__/reference.test.ts` (the same numbers your
 app's automated test suite checks against). For scripts 08–09 the comments
 are the exact output of the app's own Python engine (`pysyncon` / `csdid`)
 re-run on the identical saved fixture, computed at the same time the
-fixture was generated — so all nine scripts are genuine digit-for-digit (or
+fixture was generated — so all ten scripts are genuine digit-for-digit (or
 near-digit) checks against native R, using the exact same data in every
 case. No script regenerates or simulates data itself.
 
@@ -44,5 +45,5 @@ case. No script regenerates or simulates data itself.
 > sklearn (see `reference.test.ts`), a subset of core methods were
 > independently cross-checked against native R execution of the packages
 > the platform is designed to match (`plm`, `glmnet`, `forecast`, `urca`,
-> `vars`, `rugarch`, `quantreg`, `Synth`, `did`), using identical fixture
+> `vars`, `rugarch`, `quantreg`, `Synth`, `did`, `AER`), using identical fixture
 > data where available. Scripts are provided in `r_verification/`."
