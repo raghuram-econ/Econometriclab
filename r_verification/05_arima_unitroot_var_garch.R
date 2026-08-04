@@ -33,7 +33,7 @@ cat("\n=== KPSS (level) ===\n"); print(ur.kpss(kpss_x, type = "mu", lags = "shor
 cat("\n=== KPSS (trend) ===\n"); print(ur.kpss(kpss_x, type = "tau", lags = "short"))
 # Compare: kpssStat ~0.03467
 
-cat("\n=== Phillips-Perron ===\n"); print(pp.test(kpss_x))
+cat("\n=== Phillips-Perron ===\n"); print(PP.test(kpss_x))
 # Compare: Z-tau statistic ~ -6.770186 (from the arch package reference)
 
 # --- VAR(2) ---

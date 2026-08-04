@@ -5,8 +5,9 @@
 #           psm_series.csv (pscore, T, Y -- propensity scores already computed,
 #                            so this isolates just the MATCHING algorithm)
 # =============================================================================
-# install.packages(c("MatchIt"))
-library(MatchIt)
+# No extra packages needed -- both parts use base R only. (The matching
+# below is written out manually rather than via MatchIt, specifically so it
+# mirrors the app's own nearest-neighbor algorithm exactly for comparison.)
 
 # --- Simple DiD via OLS interaction (the standard textbook approach) ---
 did_df <- read.csv("../src/lib/econometrics/__tests__/fixtures/did_synthetic.csv")
