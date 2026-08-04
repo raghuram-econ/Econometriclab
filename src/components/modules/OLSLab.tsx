@@ -888,7 +888,11 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
             variableMetadata={variableMetadata} 
             modelType="ols"
             xVariables={independentVars}
-            options={{ robust: useRobust }}
+            options={{
+              robust: useRobust,
+              clusterVar: seEstimator === 'Cluster' ? clusterVar : undefined,
+              seType: seEstimator
+            }}
           />
 
           {/* Collapsible Hypothesis Tests Panel */}
@@ -954,10 +958,13 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
                 <h4 className="text-sm font-bold uppercase tracking-tight text-slate-900">Institutional Reproducibility Code</h4>
              </div>
              <CodeBridge 
-                modelType="ols" 
-                yVar={dependentVar} 
-                xVars={independentVars} 
-                options={{ robust: useRobust }} 
+                modelType="ols"
+                yVar={dependentVar}
+                xVars={independentVars}
+                options={{
+                  robust: useRobust,
+                  cluster: seEstimator === 'Cluster' ? clusterVar : undefined
+                }}
              />
           </section>
         </section>

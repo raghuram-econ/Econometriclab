@@ -556,7 +556,9 @@ export default function RegressionResultsTable({
         code += `model_${idx + 1} <- lm(${formula}, data = df)\n`;
         if (spec.options?.clusterVar) {
           code += `# Clustered standard errors by ${spec.options.clusterVar}\n`;
-          code += `coeftest(model_${idx + 1}, vcovHC(model_${idx + 1}, type = "HC1", cluster = "group", group = df$${spec.options.clusterVar}))\n`;
+          code += `# NOTE: vcovHC() does not support clustering; vcovCL() is the correct\n`;
+          code += `# function for clustered SEs on an lm object.\n`;
+          code += `coeftest(model_${idx + 1}, vcov = vcovCL(model_${idx + 1}, cluster = df$${spec.options.clusterVar}))\n`;
         } else if (spec.options?.robust) {
           code += `# Robust standard errors (White/HC1)\n`;
           code += `coeftest(model_${idx + 1}, vcov = vcovHC(model_${idx + 1}, type = "HC1"))\n`;

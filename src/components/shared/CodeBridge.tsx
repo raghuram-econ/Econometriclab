@@ -71,8 +71,8 @@ export const CodeBridge: React.FC<CodeBridgeProps> = ({ modelType, yVar, xVars, 
       case 'ols':
         const xList = xVars.map(v => `'${v}'`).join(', ');
         let code = `import statsmodels.api as sm\n\nY = df['${yVar}']\nX = df[[${xList}]]\nX = sm.add_constant(X)\n\nmodel = sm.OLS(Y, X)\n`;
-        if (options?.robust) code += `results = model.fit(cov_type='HC1')`;
-        else if (options?.cluster) code += `results = model.fit(cov_type='cluster', cov_kwds={'groups': df['${options.cluster}']})`;
+        if (options?.cluster) code += `results = model.fit(cov_type='cluster', cov_kwds={'groups': df['${options.cluster}']})`;
+        else if (options?.robust) code += `results = model.fit(cov_type='HC1')`;
         else code += `results = model.fit()`;
         code += `\nprint(results.summary())`;
         return code;
