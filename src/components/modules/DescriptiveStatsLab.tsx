@@ -18,9 +18,17 @@ import {
 import { Dataset } from '../../types';
 import { VariableMetadata } from '../../hooks/useVariableMetadata';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
-import jStat from 'jstat';
 import Chart from 'chart.js/auto';
 import { useStore } from '../../store/useStore';
+import {
+  getPercentile,
+  sampleVariance,
+  skewness as computeSkewness,
+  kurtosis as computeKurtosis,
+  pearsonCorrelation,
+  chiSquareGoodnessOfFit,
+  tukeyFenceOutliers
+} from '../../lib/statistics/descriptiveStats';
 
 interface DescriptiveStatsLabProps {
   dataset?: Dataset | null;
@@ -160,7 +168,7 @@ export default function DescriptiveStatsLab({ dataset, uploadedData, variableMet
       const mean = sum / N;
 
       // Sample variance and standard deviation
-      const variance = N > 1 ? vals.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / (N - 1) : 0;
+      const variance = sampleVariance(vals, mean);
       const stdDev = Math.sqrt(variance);
 
       const min = Math.min(...vals);
@@ -168,36 +176,13 @@ export default function DescriptiveStatsLab({ dataset, uploadedData, variableMet
 
       // Percentiles
       const sorted = [...vals].sort((a, b) => a - b);
-      const getPercentile = (p: number): number => {
-        if (sorted.length === 0) return 0;
-        if (sorted.length === 1) return sorted[0] ?? 0;
-        const idx = (sorted.length - 1) * p;
-        const low = Math.floor(idx);
-        const high = Math.ceil(idx);
-        const lowVal = sorted[low] ?? 0;
-        if (low === high) return lowVal;
-        const highVal = sorted[high] ?? 0;
-        return lowVal + (idx - low) * (highVal - lowVal);
-      };
-
-      const q1 = getPercentile(0.25);
-      const median = getPercentile(0.50);
-      const q3 = getPercentile(0.75);
+      const q1 = getPercentile(sorted, 0.25);
+      const median = getPercentile(sorted, 0.50);
+      const q3 = getPercentile(sorted, 0.75);
 
       // Skewness & Kurtosis (Sample definitions matching SAS/SPSS)
-      let skewness = 0;
-      if (N >= 3 && stdDev > 0) {
-        const sumCubed = sorted.reduce((acc, val) => acc + Math.pow((val - mean) / stdDev, 3), 0);
-        skewness = (N / ((N - 1) * (N - 2))) * sumCubed;
-      }
-
-      let kurtosis = 0;
-      if (N >= 4 && stdDev > 0) {
-        const sumFourth = sorted.reduce((acc, val) => acc + Math.pow((val - mean) / stdDev, 4), 0);
-        const term1 = (N * (N + 1)) / ((N - 1) * (N - 2) * (N - 3));
-        const term2 = (3 * Math.pow(N - 1, 2)) / ((N - 2) * (N - 3));
-        kurtosis = term1 * sumFourth - term2;
-      }
+      const skewness = computeSkewness(sorted, mean, stdDev);
+      const kurtosis = computeKurtosis(sorted, mean, stdDev);
 
       return {
         variable: varName,
@@ -243,18 +228,7 @@ export default function DescriptiveStatsLab({ dataset, uploadedData, variableMet
       .sort((a, b) => (b.count || 0) - (a.count || 0));
 
     // Chi-Square Goodness of Fit Test against a uniform distribution (equal expected frequencies)
-    const k = freqRows.length;
-    let chiSquare = 0;
-    let df = k - 1;
-    let pValue = 1;
-
-    if (k > 1) {
-      const expected = N / k;
-      freqRows.forEach(row => {
-        chiSquare += Math.pow(row.count - expected, 2) / expected;
-      });
-      pValue = 1 - jStat.chisquare.cdf(chiSquare, df);
-    }
+    const { chiSquare, df, pValue, k } = chiSquareGoodnessOfFit(freqRows.map(row => row.count), N);
 
     return {
       rows: freqRows,
@@ -309,46 +283,10 @@ export default function DescriptiveStatsLab({ dataset, uploadedData, variableMet
           }
         });
 
-        const n = aligned.length;
-        if (n < 2) {
-          mCol1[v2] = { r: 0, p: 1, n };
-          mCol2[v1] = { r: 0, p: 1, n };
-          continue;
-        }
+        const xVals = aligned.map(pair => pair[0]);
+        const yVals = aligned.map(pair => pair[1]);
 
-        const xVals = aligned.map(p => p[0]);
-        const yVals = aligned.map(p => p[1]);
-
-        const xMean = xVals.reduce((a, b) => a + b, 0) / n;
-        const yMean = yVals.reduce((a, b) => a + b, 0) / n;
-
-        let num = 0;
-        let denX = 0;
-        let denY = 0;
-
-        for (let idx = 0; idx < n; idx++) {
-          const dx = (xVals[idx] ?? 0) - xMean;
-          const dy = (yVals[idx] ?? 0) - yMean;
-          num += dx * dy;
-          denX += dx * dx;
-          denY += dy * dy;
-        }
-
-        if (denX === 0 || denY === 0) {
-          mCol1[v2] = { r: 0, p: 1, n };
-          mCol2[v1] = { r: 0, p: 1, n };
-          continue;
-        }
-
-        const r = num / Math.sqrt(denX * denY);
-        let p = 1.0;
-        
-        if (n > 2 && Math.abs(r) < 1) {
-          const t = r * Math.sqrt(n - 2) / Math.sqrt(1 - r * r);
-          p = 2 * (1 - jStat.studentt.cdf(Math.abs(t), n - 2));
-        } else if (Math.abs(r) === 1) {
-          p = 0.0;
-        }
+        const { r, p, n } = pearsonCorrelation(xVals, yVals);
 
         mCol1[v2] = { r, p, n };
         mCol2[v1] = { r, p, n };
@@ -409,7 +347,7 @@ export default function DescriptiveStatsLab({ dataset, uploadedData, variableMet
 
     // Normal curve fitting parameters
     const mean = vals.reduce((a, b) => a + b, 0) / N;
-    const variance = N > 1 ? vals.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / (N - 1) : 0;
+    const variance = sampleVariance(vals, mean);
     const s = Math.sqrt(variance);
 
     // Generate fitted normal curve points at the midpoints
@@ -509,35 +447,11 @@ export default function DescriptiveStatsLab({ dataset, uploadedData, variableMet
     const min = sorted[0] ?? 0;
     const max = sorted[N - 1] ?? 0;
 
-    const getPercentile = (p: number) => {
-      const idx = (N - 1) * p;
-      const low = Math.floor(idx);
-      const high = Math.ceil(idx);
-      const lowVal = sorted[low] ?? 0;
-      if (low === high) return lowVal;
-      const highVal = sorted[high] ?? 0;
-      return lowVal + (idx - low) * (highVal - lowVal);
-    };
-
-    const q1 = getPercentile(0.25);
-    const median = getPercentile(0.50);
-    const q3 = getPercentile(0.75);
-    const iqr = q3 - q1;
-
     // Mean
     const mean = vals.reduce((a, b) => a + b, 0) / N;
 
-    // Tukey fences (1.5 * IQR)
-    const lowerFence = q1 - 1.5 * iqr;
-    const upperFence = q3 + 1.5 * iqr;
-
-    // Whisker limits are actual observations within Tukey fences
-    const valuesInFence = sorted.filter(v => v >= lowerFence && v <= upperFence);
-    const whiskerMin = (valuesInFence.length > 0 ? valuesInFence[0] : q1) ?? q1;
-    const whiskerMax = (valuesInFence.length > 0 ? valuesInFence[valuesInFence.length - 1] : q3) ?? q3;
-
-    // Outliers are observations outside whiskers
-    const outliers = sorted.filter(v => v < whiskerMin || v > whiskerMax);
+    // Quartiles, Tukey fences (1.5 * IQR), whiskers, and outliers
+    const { q1, median, q3, iqr, whiskerMin, whiskerMax, outliers } = tukeyFenceOutliers(sorted);
 
     return {
       min,

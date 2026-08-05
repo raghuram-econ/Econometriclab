@@ -15,9 +15,8 @@ import {
 import { Dataset } from '../../types';
 import { generateMasterDataset } from '../../lib/dataGenerators';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
-import jStat from 'jstat';
-import * as math from 'mathjs';
 import { runADFTest, runKPSSTest, runPhillipsPerronTest } from '../../lib/econometrics/arima';
+import { standaloneJarqueBera, standaloneDurbinWatson, ramseyReset } from '../../lib/econometrics/diagnostics';
 import { runUnitRoot } from '../../services/apiClient';
 
 interface StatTestsLabProps {
@@ -135,40 +134,23 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
         const N = values.length;
 
         if (testType === 'normality') {
-          // Calculate mean, variance, skewness, kurtosis for Jarque-Bera
-          const mean = values.reduce((sum, v) => sum + v, 0) / N;
-          const m2 = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / N;
-          const m3 = values.reduce((sum, v) => sum + (v - mean) ** 3, 0) / N;
-          const m4 = values.reduce((sum, v) => sum + (v - mean) ** 4, 0) / N;
-
-          const variance = m2;
-          const stdDev = Math.sqrt(variance);
-          
-          // Skewness and Kurtosis (unbiased/standard formulas)
-          const skewness = m3 / (stdDev ** 3);
-          const kurtosis = m4 / (stdDev ** 4);
-
-          // Jarque-Bera statistic
-          const jbStat = (N / 6) * (skewness ** 2 + ((kurtosis - 3) ** 2) / 4);
-          
-          // Chi-square p-value with 2 d.f.
-          const pValue = 1 - jStat.chisquare.cdf(jbStat, 2);
+          const jb = standaloneJarqueBera(values);
 
           setTestResult({
             type: 'normality',
             variable: selectedVar,
             n: N,
-            mean,
-            stdDev,
-            skewness,
-            kurtosis,
-            stat: jbStat,
-            pValue,
+            mean: jb.mean,
+            stdDev: jb.stdDev,
+            skewness: jb.skewness,
+            kurtosis: jb.kurtosis,
+            stat: jb.stat,
+            pValue: jb.pValue,
             nullHypothesis: "The variable is normally distributed.",
             altHypothesis: "The variable is NOT normally distributed.",
-            decision: pValue < 0.05 ? "Reject Null Hypothesis" : "Fail to Reject Null Hypothesis"
+            decision: jb.pValue < 0.05 ? "Reject Null Hypothesis" : "Fail to Reject Null Hypothesis"
           });
-        } 
+        }
         else if (testType === 'stationarity') {
           // Augmented Dickey-Fuller (ADF) test via the certified estimator
           // (verified against statsmodels.tsa.stattools.adfuller in reference.test.ts
@@ -188,38 +170,18 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
           });
         }
         else if (testType === 'autocorrelation') {
-          // Durbin-Watson statistic calculation
-          // DW = sum_{t=2}^N (e_t - e_{t-1})^2 / sum_{t=1}^N e_t^2
-          // If we run OLS on a simple AR(1) or residuals of selected var vs trend
-          const mean = values.reduce((sum, v) => sum + v, 0) / N;
-          const residuals = values.map(v => v - mean);
-
-          let num = 0;
-          let den = 0;
-
-          for (let t = 0; t < N; t++) {
-            den += (residuals[t] ?? 0) ** 2;
-            if (t > 0) {
-              num += ((residuals[t] ?? 0) - (residuals[t-1] ?? 0)) ** 2;
-            }
-          }
-
-          const dwStat = den > 0 ? num / den : 2.0;
-
-          let diagnosis = "No significant autocorrelation";
-          if (dwStat < 1.5) diagnosis = "Positive serial correlation detected (DW < 1.5)";
-          else if (dwStat > 2.5) diagnosis = "Negative serial correlation detected (DW > 2.5)";
+          const dw = standaloneDurbinWatson(values);
 
           setTestResult({
             type: 'autocorrelation',
             variable: selectedVar,
             n: N,
-            stat: dwStat,
+            stat: dw.stat,
             pValue: null, // DW uses critical bound tables instead of a direct analytical p-value
-            diagnosis,
+            diagnosis: dw.diagnosis,
             nullHypothesis: "No first-order serial correlation in errors.",
             altHypothesis: "Errors exhibit first-order serial correlation.",
-            decision: (dwStat < 1.5 || dwStat > 2.5) ? "Reject Null Hypothesis" : "Fail to Reject Null Hypothesis"
+            decision: (dw.stat < 1.5 || dw.stat > 2.5) ? "Reject Null Hypothesis" : "Fail to Reject Null Hypothesis"
           });
         }
         else if (testType === 'specification') {
@@ -239,50 +201,20 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
               return r && !isNaN(parseFloat(r[selectedVar])) && !isNaN(parseFloat(r[selectedVarX]));
             });
 
-          const N_spec = Y_val.length;
-          const X_mat = X_val.map(x => [1, x]);
-
-          // Run OLS 1
-          const Xt1 = math.transpose(X_mat);
-          const XtX1 = math.multiply(Xt1, X_mat);
-          const XtX1_inv = math.inv(XtX1 as any) as any as number[][];
-          const beta1 = math.multiply(XtX1_inv, math.multiply(Xt1, Y_val)) as any as number[];
-
-          const Y_hat = math.multiply(X_mat, beta1) as any as number[];
-          const res1 = Y_val.map((y, idx) => y - (Y_hat[idx] ?? 0));
-          const rss1 = res1.reduce((sum, r) => sum + r * r, 0);
-
-          // Run OLS 2 (Ramsey auxiliary regression with Y_hat^2 and Y_hat^3)
-          const X_aux = X_val.map((x, idx) => [1, x, (Y_hat[idx] ?? 0) ** 2, (Y_hat[idx] ?? 0) ** 3]) as any as number[][];
-          const k_aux = 4;
-
-          const Xt2 = math.transpose(X_aux);
-          const XtX2 = math.multiply(Xt2, X_aux);
-          const XtX2_inv = math.inv(XtX2 as any) as any as number[][];
-          const beta2 = math.multiply(XtX2_inv, math.multiply(Xt2, Y_val)) as any as number[];
-
-          const Y_hat2 = math.multiply(X_aux, beta2) as any as number[];
-          const res2 = Y_val.map((y, idx) => y - (Y_hat2[idx] ?? 0));
-          const rss2 = res2.reduce((sum, r) => sum + r * r, 0);
-
-          // F-statistic for the two restricted parameters
-          const numDf = 2;
-          const denDf = N_spec - k_aux;
-          const fStat = ((rss1 - rss2) / numDf) / (rss2 / denDf);
-          const pValue = 1 - jStat.centralF.cdf(fStat, numDf, denDf);
+          const reset = ramseyReset(Y_val, X_val);
 
           setTestResult({
             type: 'specification',
             variable: selectedVar,
             varX: selectedVarX,
-            n: N_spec,
-            stat: fStat,
-            pValue,
-            rssRestricted: rss1,
-            rssUnrestricted: rss2,
+            n: reset.n,
+            stat: reset.stat,
+            pValue: reset.pValue,
+            rssRestricted: reset.rssRestricted,
+            rssUnrestricted: reset.rssUnrestricted,
             nullHypothesis: "The functional specification is correct (no omitted non-linear terms).",
             altHypothesis: "The specification is incorrect (omitted non-linear powers of fitted values).",
-            decision: pValue < 0.05 ? "Reject Null (Omitted non-linearities exist)" : "Fail to Reject (No model specification issues)"
+            decision: reset.pValue < 0.05 ? "Reject Null (Omitted non-linearities exist)" : "Fail to Reject (No model specification issues)"
           });
         }
         else if (testType === 'kpss') {

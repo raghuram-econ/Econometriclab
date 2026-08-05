@@ -13,6 +13,8 @@ import fs from 'fs';
 import path from 'path';
 import Papa from 'papaparse';
 import { estimateModel } from '../estimators';
+import { runOLS } from '../ols';
+import { standaloneJarqueBera, standaloneDurbinWatson, ramseyReset } from '../diagnostics';
 import { runTobitMLE } from '../tobit';
 import { approximateADFPValue, runKPSSTest, runPhillipsPerronTest, runVAR, runGARCH, runARIMA } from '../arima';
 import { runPoissonMLE, runNegBinomialMLE } from '../count';
@@ -558,5 +560,209 @@ describe('GARCH(1,1) sanity-checked against the arch package', () => {
       const perturbed = evalLL(res.omega + dOmega!, res.alpha + dAlpha!, res.beta + dBeta!);
       expect(perturbed).toBeLessThanOrEqual(atOptimum + 1e-6);
     }
+  });
+});
+
+describe('OLS regression-residual diagnostics against statsmodels (Longley)', () => {
+  // Same spec as the golden longley_ols_robust fixture (TOTEMP ~ GNPDEFL + GNP +
+  // UNEMP + ARMED + POP + YEAR), computed independently in Python via:
+  //   import pandas as pd, statsmodels.api as sm
+  //   from statsmodels.stats.diagnostic import het_breuschpagan
+  //   from statsmodels.stats.outliers_influence import variance_inflation_factor
+  //   from statsmodels.stats.stattools import durbin_watson, jarque_bera
+  //   df = pd.read_csv('longley.csv')
+  //   X = sm.add_constant(df[['GNPDEFL','GNP','UNEMP','ARMED','POP','YEAR']])
+  //   model = sm.OLS(df['TOTEMP'], X).fit()
+  //   het_breuschpagan(model.resid, model.model.exog)         # -> (lm, lm_p, f, f_p)
+  //   durbin_watson(model.resid)
+  //   jarque_bera(model.resid)                                 # -> (jb, jb_p, skew, kurtosis)
+  //   [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+  // Computed live, 2026-08-05 (statsmodels 0.14.6).
+  const data = loadCSVRows('longley.csv');
+  const xVars = ['GNPDEFL', 'GNP', 'UNEMP', 'ARMED', 'POP', 'YEAR'];
+
+  const REF = {
+    breuschPaganStat: 2.5096632072823777,
+    breuschPaganPValue: 0.8673846348975037,
+    durbinWatson: 2.5594876892803886,
+    jarqueBeraStat: 0.6841355859532305,
+    jarqueBeraPValue: 0.71030004972225,
+    // VIFs exclude the intercept -- statsmodels' variance_inflation_factor is
+    // indexed by column position (0 = const), so these map to indices 1..6.
+    // GNP is deliberately excluded here: its auxiliary R^2 against the other
+    // five regressors is so close to 1 (this codebase's own runOLS reports
+    // it above 0.9994) that both runOLS and estimateModel clamp the R^2 used
+    // in 1/(1-R^2) to 0.999, capping VIF at exactly 1000 -- vs. statsmodels'
+    // uncapped 1788.51. That clamp is a deliberate numerical-stability guard
+    // (see the `Math.min(0.999, ...)` in both ols.ts and estimators.ts), not
+    // a drift bug, so it is checked separately below instead of against the
+    // statsmodels value.
+    vifs: {
+      GNPDEFL: 135.53243827999347,
+      UNEMP: 33.61889059602815,
+      ARMED: 3.588930193443873,
+      POP: 399.1510223127912,
+      YEAR: 758.9805974066686,
+    } as Record<string, number>,
+    // The capped value both engines actually return for GNP.
+    gnpVifCapped: 999.9999999999991,
+  };
+
+  describe('runOLS (src/lib/econometrics/ols.ts)', () => {
+    const res = runOLS(data, 'TOTEMP', xVars, true, false);
+
+    it('matches the Breusch-Pagan LM statistic and p-value', () => {
+      expect(relErr(res.breuschPaganStat!, REF.breuschPaganStat)).toBeLessThan(COEF_TOL);
+      expect(relErr(res.breuschPaganPValue!, REF.breuschPaganPValue)).toBeLessThan(COEF_TOL);
+    });
+
+    it('matches the Durbin-Watson statistic', () => {
+      expect(relErr(res.durbinWatson!, REF.durbinWatson)).toBeLessThan(COEF_TOL);
+    });
+
+    it('matches the Jarque-Bera statistic and p-value', () => {
+      expect(relErr(res.jarqueBeraStat!, REF.jarqueBeraStat)).toBeLessThan(COEF_TOL);
+      expect(relErr(res.jarqueBeraPValue!, REF.jarqueBeraPValue)).toBeLessThan(COEF_TOL);
+    });
+
+    it('matches every regressor VIF except the intentionally-clamped GNP', () => {
+      for (const [name, expected] of Object.entries(REF.vifs)) {
+        expect(res.vifs?.[name]).toBeDefined();
+        expect(relErr(res.vifs![name]!, expected)).toBeLessThan(COEF_TOL);
+      }
+    });
+
+    it('clamps GNP VIF at 1000 rather than the true 1788.51', () => {
+      expect(relErr(res.vifs!.GNP!, REF.gnpVifCapped)).toBeLessThan(COEF_TOL);
+    });
+
+    it('attaches the matching VIF onto each coefficient row', () => {
+      for (const [name, expected] of Object.entries(REF.vifs)) {
+        const c = coef(res, name);
+        expect(c.vif).toBeDefined();
+        expect(relErr(c.vif, expected)).toBeLessThan(COEF_TOL);
+      }
+    });
+  });
+
+  describe("estimateModel('OLS') (src/lib/econometrics/estimators.ts)", () => {
+    const res = estimateModel('OLS', { data, yVar: 'TOTEMP', xVars });
+
+    it('matches the Breusch-Pagan LM statistic and p-value', () => {
+      expect(relErr(res.breuschPaganStat!, REF.breuschPaganStat)).toBeLessThan(COEF_TOL);
+      expect(relErr(res.breuschPaganPValue!, REF.breuschPaganPValue)).toBeLessThan(COEF_TOL);
+    });
+
+    it('matches the Durbin-Watson statistic', () => {
+      expect(relErr(res.durbinWatson!, REF.durbinWatson)).toBeLessThan(COEF_TOL);
+    });
+
+    it('matches every regressor VIF except the intentionally-clamped GNP', () => {
+      for (const [name, expected] of Object.entries(REF.vifs)) {
+        expect(res.vifs![name]).toBeDefined();
+        expect(relErr(res.vifs![name]!, expected)).toBeLessThan(COEF_TOL);
+      }
+    });
+
+    it('clamps GNP VIF at 1000 rather than the true 1788.51', () => {
+      expect(relErr(res.vifs!.GNP!, REF.gnpVifCapped)).toBeLessThan(COEF_TOL);
+    });
+  });
+});
+
+describe('Standalone diagnostics in StatTestsLab (src/lib/econometrics/diagnostics.ts)', () => {
+  // These are separate code paths from the regression-residual diagnostics
+  // above: JB and DW here run directly on a raw/demeaned series rather than
+  // OLS residuals, and Ramsey RESET has no other implementation to compare
+  // against internally, so all three are checked against hand/Python-derived
+  // values on small worked examples instead.
+
+  describe('standaloneJarqueBera', () => {
+    // A visibly right-skewed, fat-tailed sample. Reference computed via:
+    //   import numpy as np
+    //   from scipy import stats
+    //   vals = np.array([2,3,3,4,4,4,5,5,6,20], dtype=float)
+    //   n = len(vals); mean = vals.mean()
+    //   m2, m3, m4 = [((vals-mean)**p).mean() for p in (2,3,4)]
+    //   skew, kurt = m3/m2**1.5, m4/m2**2
+    //   jb = (n/6)*(skew**2 + (kurt-3)**2/4)
+    //   stats.chi2.sf(jb, 2)
+    // Computed live, 2026-08-05: skew=2.42285418284316, kurt=7.3654053524164285,
+    // JB=17.724022273411826, p=0.00014166986001129533.
+    const vals = [2, 3, 3, 4, 4, 4, 5, 5, 6, 20];
+
+    it('matches the hand-derived skewness, kurtosis, JB statistic, and p-value', () => {
+      const res = standaloneJarqueBera(vals);
+      expect(res.n).toBe(10);
+      expect(relErr(res.skewness, 2.42285418284316)).toBeLessThan(COEF_TOL);
+      expect(relErr(res.kurtosis, 7.3654053524164285)).toBeLessThan(COEF_TOL);
+      expect(relErr(res.stat, 17.724022273411826)).toBeLessThan(COEF_TOL);
+      expect(relErr(res.pValue, 0.00014166986001129533)).toBeLessThan(COEF_TOL);
+    });
+
+    it('rejects normality at the 5% level for this skewed sample', () => {
+      const res = standaloneJarqueBera(vals);
+      expect(res.pValue).toBeLessThan(0.05);
+    });
+  });
+
+  describe('standaloneDurbinWatson', () => {
+    // A strongly positively-autocorrelated (monotonically rising) series.
+    // Reference computed via:
+    //   import numpy as np
+    //   series = np.array([10,12,11,15,14,20,18,25,23,30], dtype=float)
+    //   dm = series - series.mean()
+    //   num = sum((dm[t]-dm[t-1])**2 for t in range(1, len(dm)))
+    //   den = sum(dm**2)
+    //   num/den
+    // Computed live, 2026-08-05: DW=0.41456016177957533.
+    const series = [10, 12, 11, 15, 14, 20, 18, 25, 23, 30];
+
+    it('matches the hand-derived DW statistic on the demeaned series', () => {
+      const res = standaloneDurbinWatson(series);
+      expect(res.n).toBe(10);
+      expect(relErr(res.stat, 0.41456016177957533)).toBeLessThan(COEF_TOL);
+    });
+
+    it('flags positive serial correlation for this trending series', () => {
+      const res = standaloneDurbinWatson(series);
+      expect(res.stat).toBeLessThan(1.5);
+      expect(res.diagnosis).toMatch(/Positive serial correlation/);
+    });
+  });
+
+  describe('ramseyReset', () => {
+    // Reference computed via statsmodels.stats.diagnostic.linear_reset
+    // (power=3, use_f=True), which fits Y ~ X then adds fitted-value powers
+    // 2 and 3 to the auxiliary regression -- identical construction to this
+    // codebase's ramseyReset.
+    //   import numpy as np, statsmodels.api as sm
+    //   from statsmodels.stats.diagnostic import linear_reset
+    //   X = np.arange(1, 11, dtype=float)
+    //   Xc = sm.add_constant(X)
+
+    it('fails to reject correct specification on a near-linear DGP', () => {
+      // Y = np.array([2.1,3.9,6.2,7.8,10.3,11.9,14.2,15.8,18.3,19.9])
+      // model = sm.OLS(Y, Xc).fit(); linear_reset(model, power=3, use_f=True)
+      // Computed live, 2026-08-05: F=0.06695656729873858, p=0.9359246525128257.
+      const X = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+      const Y = [2.1, 3.9, 6.2, 7.8, 10.3, 11.9, 14.2, 15.8, 18.3, 19.9];
+      const res = ramseyReset(Y, X);
+      expect(relErr(res.stat, 0.06695656729873858)).toBeLessThan(COEF_TOL);
+      expect(relErr(res.pValue, 0.9359246525128257)).toBeLessThan(COEF_TOL);
+      expect(res.pValue).toBeGreaterThan(0.05);
+    });
+
+    it('rejects a linear specification fit to a quadratic DGP', () => {
+      // Y = X**2 + np.array([1,-1,2,-2,1,-1,2,-2,1,-1])
+      // model = sm.OLS(Y, Xc).fit(); linear_reset(model, power=3, use_f=True)
+      // Computed live, 2026-08-05: F=76.23415508815388, p=5.4278329183518034e-05.
+      const X = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+      const Y = X.map((x, i) => x * x + [1, -1, 2, -2, 1, -1, 2, -2, 1, -1][i]!);
+      const res = ramseyReset(Y, X);
+      expect(relErr(res.stat, 76.23415508815388)).toBeLessThan(COEF_TOL);
+      expect(relErr(res.pValue, 5.4278329183518034e-05)).toBeLessThan(COEF_TOL);
+      expect(res.pValue).toBeLessThan(0.05);
+    });
   });
 });

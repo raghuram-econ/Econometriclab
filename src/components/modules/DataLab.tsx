@@ -15,6 +15,7 @@ import { DataPreviewMatrix } from '../shared/DataPreviewMatrix';
 import { RawDataViewerModal } from '../shared/RawDataViewerModal';
 import { imputeMean, imputeMedian, imputeRegression } from '../../lib/econometrics/imputation';
 import { cleanNumeric, normalizeHeader, inferVariableType } from '../../lib/variableTypeDetection';
+import { applyVariableTransform } from '../../lib/variableTransforms';
 
 import { ActionCard } from '../shared/ActionCard';
 import { DataUploadPrivacyBanner } from '../privacy/PrivacyComponents';
@@ -540,22 +541,14 @@ export default function DataLab({ onDatasetChange, currentDataset, onRunComplete
     let nonPositiveCount = 0;
     const newData = (currentDataset.data || []).map(row => {
       const val = row[variableName];
-      let transformed = null;
-      if (typeof val === 'number') {
-        if (method === 'ln') {
-          if (val > 0) {
-            transformed = Math.log(val);
-          } else {
-            // Non-positive values have no real logarithm. Mark the transformed
-            // observation as missing rather than fabricating a value of 0 --
-            // downstream regressions (e.g. runOLS) already treat null/undefined
-            // as "exclude this row" via listwise deletion.
-            transformed = null;
-            nonPositiveCount++;
-          }
-        } else {
-          transformed = Math.pow(val, 2);
-        }
+      const transformed = applyVariableTransform(val, method);
+      // Non-positive values fed to 'ln' have no real logarithm and come back
+      // as null from applyVariableTransform -- tally them for the toast below
+      // rather than fabricating a value of 0 (downstream regressions, e.g.
+      // runOLS, already treat null/undefined as "exclude this row" via
+      // listwise deletion).
+      if (method === 'ln' && typeof val === 'number' && val <= 0) {
+        nonPositiveCount++;
       }
       return { ...row, [newName]: transformed };
     });
