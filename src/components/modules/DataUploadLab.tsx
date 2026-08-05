@@ -19,6 +19,7 @@ import * as XLSX from 'xlsx';
 import { uploadSavFile } from '../../services/apiClient';
 import { useDuckDB } from '../../hooks/useDuckDB';
 import DataPreview from '../shared/DataPreview';
+import { inferVariableType } from '../../lib/variableTypeDetection';
 
 interface DataUploadLabProps {
   onDataLoaded?: (payload: { rows: any[] }, filename: string) => void;
@@ -374,24 +375,16 @@ export default function DataUploadLab({ onDataLoaded }: DataUploadLabProps) {
     }
 
     // Build Variable Objects for Workspace Integration
+    // Type detection is delegated to the shared `inferVariableType` utility
+    // (also used by DataLab's processData) so both ingestion paths always
+    // agree on how a column is classified.
     const variables = headers.map(key => {
-      let type: 'numeric' | 'categorical' | 'date' | 'unknown' = 'numeric';
-      const sampleVals = rows.slice(0, 10).map(r => r[key]).filter(v => v !== null && v !== undefined);
-      const numericCount = sampleVals.filter(v => !isNaN(Number(v))).length;
-      
-      if (sampleVals.length > 0 && (numericCount / sampleVals.length) < 0.5) {
-        const val = sampleVals[0];
-        if (!isNaN(Date.parse(val))) {
-          type = 'date';
-        } else {
-          type = 'categorical';
-        }
-      }
-      return { 
-        name: key, 
-        label: variableLabels[key] || key, 
-        type, 
-        description: `Uploaded column: ${key}. ${variableLabels[key] ? 'Label: ' + variableLabels[key] : ''}` 
+      const { type } = inferVariableType(rows, key);
+      return {
+        name: key,
+        label: variableLabels[key] || key,
+        type,
+        description: `Uploaded column: ${key}. ${variableLabels[key] ? 'Label: ' + variableLabels[key] : ''}`
       };
     });
 

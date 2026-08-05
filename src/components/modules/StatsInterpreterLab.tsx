@@ -544,18 +544,15 @@ function StatsInterpreterLabComponent() {
           const est = c.estimate ?? 0;
           const se = c.stdError ?? 0;
           const tSt = c.tStat ?? 0;
-          const stars = pVal < 0.01 ? '***' : pVal < 0.05 ? '**' : pVal < 0.1 ? '*' : '';
-          const ciLower = (est - 1.96 * se).toFixed(4);
-          const ciUpper = (est + 1.96 * se).toFixed(4);
           return {
             variable: c.variable,
             estimate: est.toFixed(4),
             stdError: se.toFixed(4),
             tStat: tSt.toFixed(2),
             pValue: pVal.toFixed(4),
-            ciLower,
-            ciUpper,
-            stars
+            ciLower: c.ciLower ?? 'N/A',
+            ciUpper: c.ciUpper ?? 'N/A',
+            stars: c.stars || ''
           };
         }),
         diagnostics: {

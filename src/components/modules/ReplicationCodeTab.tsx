@@ -99,6 +99,9 @@ export const ReplicationCodeTab: React.FC<ReplicationCodeTabProps> = ({ activeRu
           xVars = item.results.ivControls || [];
           options.ivEndogenous = item.results.ivEndogenous || 'x';
           options.ivInstrument = item.results.ivInstrument || 'z';
+          const secondStage = item.results.secondStage || {};
+          options.robust = !!secondStage.robust || !!secondStage.isRobust;
+          options.cluster = secondStage.clusterVar;
         } else if (item.results.causalType === 'rd') {
           yVar = item.results.rdOutcome || 'y';
           options.rdRunning = item.results.rdRunning || 'r';
@@ -120,6 +123,15 @@ export const ReplicationCodeTab: React.FC<ReplicationCodeTabProps> = ({ activeRu
           yVar = (parts[0] ?? '').replace(/^[A-Z]+\s+Model:\s*/i, '').trim();
           xVars = (parts[1] ?? '').split('+').map(x => x.trim());
         }
+      }
+    } else if (moduleLower) {
+      // Unrecognized module type -- don't silently mislabel it as OLS.
+      console.warn(`ReplicationCodeTab: unsupported module type "${item.module}", falling back to a generic OLS placeholder.`);
+      options.unsupportedModuleType = item.module;
+      const parts = spec.split('~');
+      if (parts.length === 2) {
+        yVar = (parts[0] ?? '').trim();
+        xVars = (parts[1] ?? '').split('+').map(x => x.trim()).filter(x => x && x !== 'Intercept');
       }
     }
 
@@ -143,6 +155,17 @@ export const ReplicationCodeTab: React.FC<ReplicationCodeTabProps> = ({ activeRu
 import delimited "dataset.csv", clear
 
 `;
+
+    if (options.unsupportedModuleType) {
+      code += `* ####################################################################
+* WARNING: Unsupported model type "${options.unsupportedModuleType}"
+* This module does not yet have a dedicated replication template.
+* The snippet below is a generic OLS placeholder ONLY and does NOT
+* reflect the actual estimator used to produce this model's results.
+* ####################################################################
+
+`;
+    }
 
     if (modelType === 'ols') {
       code += `* 2. Ordinary Least Squares Estimation
@@ -221,8 +244,8 @@ didregress (${yVar} ${controls}) (${treatment}), group(${treatment}) time(${time
 * Instrument: ${instrument}
 * Exogenous Controls: ${controls || 'None'}
 
-* Run Two-Stage Least Squares with robust standard errors
-ivregress 2sls ${yVar} ${controls} (${endogenous} = ${instrument}), vce(robust)
+* Run Two-Stage Least Squares${options.cluster ? ` with clustered standard errors (by ${options.cluster})` : options.robust ? ' with robust standard errors' : ' with classical (homoskedastic) standard errors'}
+ivregress 2sls ${yVar} ${controls} (${endogenous} = ${instrument})${options.cluster ? `, vce(cluster ${options.cluster})` : options.robust ? ', vce(robust)' : ''}
 
 * Post-estimation Diagnostics
 estat firststage   * Check for weak instruments (F-statistic)
@@ -334,6 +357,18 @@ df <- read.csv("dataset.csv")
 
 `;
 
+    if (options.unsupportedModuleType) {
+      code += `# ############################################################
+# WARNING: Unsupported model type "${options.unsupportedModuleType}"
+# This module does not yet have a dedicated replication template.
+# The snippet below is a generic OLS placeholder ONLY and does NOT
+# reflect the actual model that was estimated. Please write the
+# R code for this specification manually.
+# ############################################################
+
+`;
+    }
+
     if (modelType === 'ols') {
       code += `# 3. Ordinary Least Squares Estimation
 # Dependent Variable: ${yVar}
@@ -441,15 +476,20 @@ summary(did_twfe)
 # Endogenous: ${endogenous}
 # Instrument: ${instrument}
 # Exogenous Controls: ${controls}
+# Standard errors: ${options.cluster ? `clustered by ${options.cluster}` : options.robust ? 'robust (HC1)' : 'classical (homoskedastic)'}
 
 # Method A: Using "AER" package (ivreg)
 library(AER)
 iv_model <- ivreg(${yVar} ~ ${endogenous} + ${controls} | ${instrument} + ${controls}, data = df)
-summary(iv_model, diagnostics = TRUE)
+${options.cluster
+  ? `coeftest(iv_model, vcov = vcovCL(iv_model, cluster = df$${options.cluster}))`
+  : options.robust
+  ? `coeftest(iv_model, vcov = vcovHC(iv_model, type = "HC1"))`
+  : `summary(iv_model, diagnostics = TRUE)`}
 
 # Method B: Using "fixest" package (feols - highly efficient)
 library(fixest)
-iv_fixest <- feols(${yVar} ~ ${controls} | [${endogenous}] ~ ${instrument}, data = df)
+iv_fixest <- feols(${yVar} ~ ${controls} | [${endogenous}] ~ ${instrument}, data = df${options.cluster ? `, cluster = ~${options.cluster}` : options.robust ? ', vcov = "HC1"' : ', vcov = "iid"'})
 summary(iv_fixest)
 `;
       } else if (causalType === 'rd') {

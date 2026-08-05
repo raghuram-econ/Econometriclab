@@ -14,6 +14,7 @@ import DataUploadLab from './DataUploadLab';
 import { DataPreviewMatrix } from '../shared/DataPreviewMatrix';
 import { RawDataViewerModal } from '../shared/RawDataViewerModal';
 import { imputeMean, imputeMedian, imputeRegression } from '../../lib/econometrics/imputation';
+import { cleanNumeric, normalizeHeader, inferVariableType } from '../../lib/variableTypeDetection';
 
 import { ActionCard } from '../shared/ActionCard';
 import { DataUploadPrivacyBanner } from '../privacy/PrivacyComponents';
@@ -37,7 +38,7 @@ interface DataLabProps {
 }
 
 export default function DataLab({ onDatasetChange, currentDataset, onRunComplete }: DataLabProps) {
-  const { researchQuestion } = useStore();
+  const { researchQuestion, addToast } = useStore();
   const { navigateTo } = useNavigation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -201,26 +202,6 @@ export default function DataLab({ onDatasetChange, currentDataset, onRunComplete
     setError(null);
   };
 
-  const cleanNumeric = (val: any): number | null => {
-    if (typeof val === 'number') return val;
-    if (typeof val !== 'string') return null;
-    
-    // Remove common non-numeric characters for financial/econometric data
-    // Handles: $1,000, 50%, " 12.3 ", 1,000.50
-    const cleaned = val.replace(/[$,%\s]/g, '').replace(/,/g, '');
-    if (cleaned === '') return null;
-    const parsed = parseFloat(cleaned);
-    return isNaN(parsed) ? null : parsed;
-  };
-
-  const normalizeHeader = (header: string): string => {
-    return header
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]/g, '_')   // Replace non-alphanumeric with _
-      .replace(/_+/g, '_')          // Collapse multiple _
-      .replace(/^_|_$/g, '');       // Trim leading/trailing _
-  };
 
   const processData = (name: string, data: any[], structurePreference?: string) => {
     if (!data || data.length === 0) {
@@ -231,79 +212,15 @@ export default function DataLab({ onDatasetChange, currentDataset, onRunComplete
     const originalKeys = data.length > 0 ? Object.keys(data[0]) : [];
     const variables: Variable[] = originalKeys.map(originalKey => {
       const normalizedName = normalizeHeader(originalKey);
-      
-      let rawNumericCount = 0;
-      let cleanedNumericCount = 0;
-      let dateCount = 0;
-      let totalNonEmpty = 0;
-      const invalidSamples: string[] = [];
-      
-      // Sample up to 200 rows for robust threshold-based inference
-      const sampleSize = Math.min(data.length, 200);
-      for (let i = 0; i < sampleSize; i++) {
-        const val = data[i][originalKey];
-        if (val === null || val === undefined || String(val).trim() === '') continue;
-        
-        totalNonEmpty++;
-        
-        const valStr = String(val).trim();
-        const isStrictlyNumeric = typeof val === 'number' || (!isNaN(Number(valStr)) && !valStr.includes(',') && !valStr.includes('$') && !valStr.includes('%'));
-        
-        const num = cleanNumeric(val);
-        if (num !== null) {
-          if (isStrictlyNumeric) {
-            rawNumericCount++;
-          } else {
-            cleanedNumericCount++;
-          }
-        } else if (invalidSamples.length < 3) {
-          invalidSamples.push(String(val).slice(0, 15));
-        }
-        
-        if (typeof val === 'string' && val.length > 5 && !isNaN(Date.parse(val))) {
-          dateCount++;
-        }
-      }
-      
-      let type: DataType = 'categorical';
-      let isAmbiguous = false;
-      let isCleaned = false;
-      let description = "";
-      
-      if (totalNonEmpty > 0) {
-        const totalNumeric = rawNumericCount + cleanedNumericCount;
-        const numericRatio = totalNumeric / totalNonEmpty;
-        const dateRatio = dateCount / totalNonEmpty;
+      const { type, isAmbiguous, isCleaned, description } = inferVariableType(data, originalKey);
 
-        if (numericRatio >= 0.8) {
-          type = 'numeric';
-          if (cleanedNumericCount > 0) {
-            isCleaned = true;
-            description = `Successfully cleaned and converted ${cleanedNumericCount} entries to numeric.`;
-          }
-        } else if (dateRatio >= 0.8) {
-          type = 'date';
-        } else if (numericRatio > 0.4) {
-          // This case: looks like a number but too many dirty entries
-          isAmbiguous = true;
-          const percentInvalid = Math.round((1 - numericRatio) * 100);
-          description = `Predominantly numeric but failed to clean ${percentInvalid}% of values (e.g., ${invalidSamples.join(', ')}). Flagged as ambiguous.`;
-        } else if (numericRatio > 0.1) {
-          isAmbiguous = true;
-          description = "Mixed types: Contains numeric values but primarily categorical.";
-        }
-      } else {
-        type = 'unknown';
-        description = "Column appears empty.";
-      }
-
-      return { 
-        name: normalizedName || `var_${Math.random().toString(36).substr(2, 5)}`, 
+      return {
+        name: normalizedName || `var_${Math.random().toString(36).substr(2, 5)}`,
         label: originalKey,
-        type, 
-        isAmbiguous, 
+        type,
+        isAmbiguous,
         isCleaned,
-        description 
+        description
       };
     });
 
@@ -620,12 +537,22 @@ export default function DataLab({ onDatasetChange, currentDataset, onRunComplete
       return;
     }
 
+    let nonPositiveCount = 0;
     const newData = (currentDataset.data || []).map(row => {
       const val = row[variableName];
       let transformed = null;
       if (typeof val === 'number') {
         if (method === 'ln') {
-          transformed = val > 0 ? Math.log(val) : 0;
+          if (val > 0) {
+            transformed = Math.log(val);
+          } else {
+            // Non-positive values have no real logarithm. Mark the transformed
+            // observation as missing rather than fabricating a value of 0 --
+            // downstream regressions (e.g. runOLS) already treat null/undefined
+            // as "exclude this row" via listwise deletion.
+            transformed = null;
+            nonPositiveCount++;
+          }
         } else {
           transformed = Math.pow(val, 2);
         }
@@ -647,7 +574,15 @@ export default function DataLab({ onDatasetChange, currentDataset, onRunComplete
       variables: [...(currentDataset.variables || []), newVariable],
       colCount: currentDataset.colCount + 1
     });
-    
+
+    if (method === 'ln' && nonPositiveCount > 0) {
+      addToast(
+        'info',
+        'Some values excluded from log transform',
+        `${nonPositiveCount} observation(s) had non-positive values of "${variableName}" and were set to missing in "${newName}" (log is undefined for values <= 0). These rows will be excluded from any regression using "${newName}".`
+      );
+    }
+
     setLoading(false);
   };
 
