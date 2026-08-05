@@ -15,10 +15,12 @@ import {
   AlertTriangle 
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import jStat from 'jstat';
 import { useStore } from '../../store/useStore';
 import { useNavigation } from '../../hooks/useNavigation';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
 import { cn } from '../../lib/utils';
+import { runOLS, preprocessDataAndVars } from '../../lib/econometrics/ols';
 
 // Error function (Abramowitz & Stegun 7.1.26, |error| < 1.5e-7) used for the
 // chi-squared(1) p-value of the lag-1 LM autocorrelation test below.
@@ -28,6 +30,183 @@ function erf(x: number): number {
   const t = 1 / (1 + 0.3275911 * ax);
   const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-ax * ax);
   return sign * y;
+}
+
+type HeteroTestResult =
+  | { ok: true; stat: number; df1: number; df2?: number; p: number }
+  | { ok: false; reason: string };
+
+type ReconResult =
+  | { ok: true; filteredData: any[]; finalYVar: string; finalXVars: string[]; refit: any }
+  | { ok: false; reason: string };
+
+// Parses the "y ~ x1 + x2 + x3 (suffix)" specification strings produced by the
+// estimation labs (see OLSLab.tsx) into a dependent variable and a list of raw
+// regressor column names. Interaction/polynomial shorthand (e.g. "x1*x2") is
+// rejected since those aren't literal dataset columns we can look up.
+function parseOLSSpecification(spec: string): { yVar: string; xVars: string[] } | null {
+  if (!spec) return null;
+  const tildeIdx = spec.indexOf('~');
+  if (tildeIdx === -1) return null;
+  const yVar = spec.slice(0, tildeIdx).trim();
+  let rhs = spec.slice(tildeIdx + 1).trim();
+  // Strip a trailing parenthetical annotation, e.g. "(OLS)", "(Quantile: 0.5)"
+  rhs = rhs.replace(/\s*\([^)]*\)\s*$/, '').trim();
+  if (!yVar || !rhs) return null;
+  const xVars = rhs.split('+').map(v => v.trim()).filter(Boolean);
+  if (xVars.length === 0 || xVars.some(v => /[*:^]/.test(v))) return null;
+  return { yVar, xVars };
+}
+
+// Real White's/Goldfeld-Quandt tests need the raw per-observation regressor
+// matrix (X), which is NOT stored on a saved model's `results` (only
+// coefficients, residuals, fitted values, and summary stats are kept in
+// history -- see ModelHistoryItem in types.ts). The only place raw rows live
+// is the dataset currently loaded in the workspace. So we reconstruct X by
+// re-running the model's own specification against `currentDataset`, then
+// validate the refit's n and R² against the model's stored values before
+// trusting it -- this prevents silently mixing a stale saved model with a
+// dataset that has since changed or been swapped out.
+function reconstructModelData(model: any, currentDataset: any): ReconResult {
+  if (!currentDataset || !Array.isArray(currentDataset.data) || currentDataset.data.length === 0) {
+    return { ok: false, reason: 'No dataset is currently loaded in the workspace to recompute this test from.' };
+  }
+  const parsed = parseOLSSpecification(model?.specification || '');
+  if (!parsed) {
+    return { ok: false, reason: "Model specification could not be parsed into a 'y ~ x1 + x2 + ...' form." };
+  }
+  const { yVar, xVars } = parsed;
+  const sampleRow = currentDataset.data[0] || {};
+  const missingCols = [yVar, ...xVars].filter(v => !(v in sampleRow));
+  if (missingCols.length > 0) {
+    return { ok: false, reason: `Loaded dataset is missing column(s) required by this model: ${missingCols.join(', ')}.` };
+  }
+
+  try {
+    const { mappedData, finalYVar, finalXVars } = preprocessDataAndVars(currentDataset.data, yVar, xVars);
+    const isMissing = (v: any) => v === undefined || v === null || v === '' || v === 'N/A' || v === 'null' || v === 'missing';
+    const numericVars = [finalYVar, ...finalXVars];
+    const filteredData = mappedData.filter((row: any) => row && numericVars.every(v => !isMissing(row[v]) && !isNaN(parseFloat(row[v]))));
+
+    if (filteredData.length < finalXVars.length + 3) {
+      return { ok: false, reason: 'Insufficient observations in the loaded dataset to recompute this test.' };
+    }
+
+    const refit = runOLS(filteredData, finalYVar, finalXVars, true, false, undefined, false, false);
+
+    // Validate: the refit must reproduce this model's stored n and R² before
+    // we trust it as "the same data" the model was originally estimated on.
+    const nMatches = model?.results?.n === refit.n;
+    const rSquaredClose = typeof model?.results?.rSquared === 'number' &&
+      Math.abs(model.results.rSquared - refit.rSquared) < 1e-4;
+    if (!nMatches || !rSquaredClose) {
+      return { ok: false, reason: 'The currently loaded dataset does not match the data behind this model (it may have changed or been swapped since estimation).' };
+    }
+
+    return { ok: true, filteredData, finalYVar, finalXVars, refit };
+  } catch (e: any) {
+    return { ok: false, reason: e?.message || 'Failed to recompute regressors for this test.' };
+  }
+}
+
+// White's General Test (with cross terms): auxiliary regression of squared
+// residuals on all X_j, all X_j^2, and all pairwise cross-products X_i*X_j
+// (i<j). LM = n * R^2_aux ~ chi-squared(df) under the null of homoskedasticity,
+// with df = number of auxiliary regressors (k + k + C(k,2)).
+function computeWhiteTest(recon: ReconResult): HeteroTestResult {
+  if (!recon.ok) return { ok: false, reason: recon.reason };
+  const { filteredData, finalXVars, refit } = recon;
+  const k = finalXVars.length;
+  const n = refit.n as number;
+  if (k === 0) return { ok: false, reason: 'No regressors available to build the auxiliary regression.' };
+
+  const auxRegressorCount = k + k + (k * (k - 1)) / 2;
+  if (n < auxRegressorCount + 5) {
+    return { ok: false, reason: `Insufficient observations (n=${n}) relative to the ${auxRegressorCount} auxiliary regressors White's test requires.` };
+  }
+
+  const residuals: number[] = refit.residuals || [];
+  const sqResiduals = residuals.map(r => r * r);
+  const augData = filteredData.map((row: any, idx: number) => {
+    const augRow: any = { ...row, _sq_res_white: sqResiduals[idx] ?? 0 };
+    finalXVars.forEach(v => {
+      const xv = parseFloat(row[v]);
+      augRow[`${v}__sq`] = xv * xv;
+    });
+    for (let i = 0; i < k; i++) {
+      for (let j = i + 1; j < k; j++) {
+        const vi = finalXVars[i]!;
+        const vj = finalXVars[j]!;
+        augRow[`${vi}__x__${vj}`] = parseFloat(row[vi]) * parseFloat(row[vj]);
+      }
+    }
+    return augRow;
+  });
+
+  const augXVars: string[] = [...finalXVars, ...finalXVars.map(v => `${v}__sq`)];
+  for (let i = 0; i < k; i++) {
+    for (let j = i + 1; j < k; j++) {
+      augXVars.push(`${finalXVars[i]}__x__${finalXVars[j]}`);
+    }
+  }
+
+  try {
+    const auxRes = runOLS(augData, '_sq_res_white', augXVars, true, false, undefined, false, false);
+    const lm = n * auxRes.rSquared;
+    const df = augXVars.length;
+    const p = 1 - jStat.chisquare.cdf(lm, df);
+    return { ok: true, stat: lm, df1: df, p };
+  } catch (e: any) {
+    return { ok: false, reason: e?.message || "Auxiliary regression for White's test failed (likely collinear cross-terms)." };
+  }
+}
+
+// Goldfeld-Quandt test: order observations by the model's fitted values, omit
+// the middle ~20% (a common convention; 1/6 is also used in textbooks -- we
+// pick 20% and split the rest into two equal halves), then regress each half
+// separately and compare mean-squared residuals. F = (RSS_larger/df_larger) /
+// (RSS_smaller/df_smaller) so F >= 1 by construction, tested against the
+// upper tail of F(df_larger, df_smaller).
+function computeGoldfeldQuandtTest(recon: ReconResult): HeteroTestResult {
+  if (!recon.ok) return { ok: false, reason: recon.reason };
+  const { filteredData, finalYVar, finalXVars, refit } = recon;
+  const k = finalXVars.length;
+  const n = refit.n as number;
+  const fitted: number[] = refit.fitted || [];
+
+  const omit = Math.round(n * 0.2);
+  const remaining = n - omit;
+  const halfSize = Math.floor(remaining / 2);
+  const minHalf = k + 3;
+
+  if (halfSize < minHalf) {
+    return { ok: false, reason: `Insufficient observations (n=${n}) to split into two halves of at least ${minHalf} observations for the Goldfeld-Quandt test.` };
+  }
+
+  const order = filteredData.map((_: any, i: number) => i).sort((a: number, b: number) => (fitted[a] ?? 0) - (fitted[b] ?? 0));
+  const lowIdx = order.slice(0, halfSize);
+  const highIdx = order.slice(n - halfSize);
+  const lowData = lowIdx.map((i: number) => filteredData[i]);
+  const highData = highIdx.map((i: number) => filteredData[i]);
+
+  try {
+    const lowRes = runOLS(lowData, finalYVar, finalXVars, true, false, undefined, false, false);
+    const highRes = runOLS(highData, finalYVar, finalXVars, true, false, undefined, false, false);
+
+    const [rssNum, dfNum, rssDen, dfDen] = (highRes.rss as number) >= (lowRes.rss as number)
+      ? [highRes.rss as number, highRes.df, lowRes.rss as number, lowRes.df]
+      : [lowRes.rss as number, lowRes.df, highRes.rss as number, highRes.df];
+
+    if (dfNum <= 0 || dfDen <= 0 || rssDen <= 1e-12) {
+      return { ok: false, reason: 'Degenerate residual sum of squares in one half; cannot compute the F-statistic.' };
+    }
+
+    const F = (rssNum / dfNum) / (rssDen / dfDen);
+    const p = 1 - jStat.centralF.cdf(F, dfNum, dfDen);
+    return { ok: true, stat: F, df1: dfNum, df2: dfDen, p };
+  } catch (e: any) {
+    return { ok: false, reason: e?.message || 'Goldfeld-Quandt sub-sample regressions failed.' };
+  }
 }
 
 // Pedagogical example models to act as fallback if history is empty
@@ -113,7 +292,7 @@ const EXAMPLE_DIAG_MODELS = [
 ];
 
 export function DiagnosticsCenter() {
-  const { history, setActiveModule } = useStore();
+  const { history, setActiveModule, currentDataset } = useStore();
 
   // Combine real run history and presets to guarantee an interactive experience
   const activeHistory = history.length > 0 ? history.map(h => ({
@@ -241,9 +420,17 @@ export function DiagnosticsCenter() {
     }
   }
 
+  // White's General Test and Goldfeld-Quandt test both need the raw
+  // per-observation regressor matrix, which isn't stored on the saved model
+  // -- so we reconstruct it (with validation) from the dataset currently
+  // loaded in the workspace. See reconstructModelData() above for details.
+  const dataRecon = reconstructModelData(model, currentDataset);
+  const whiteResult = computeWhiteTest(dataRecon);
+  const gqResult = computeGoldfeldQuandtTest(dataRecon);
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16">
-      
+
       {/* HEADER BAR */}
       <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-slate-200 pb-6 gap-4">
         <div className="space-y-1.5">
@@ -514,43 +701,46 @@ export function DiagnosticsCenter() {
                         </td>
                       </tr>
                       <tr className="border-b border-slate-200 bg-slate-50">
-                        <td className="py-2.5 px-4 font-bold text-slate-800">White's General Test (with interactions)</td>
+                        <td className="py-2.5 px-4 font-bold text-slate-800" title={!whiteResult.ok ? whiteResult.reason : undefined}>White's General Test (with interactions)</td>
                         <td className="py-2.5 px-4 text-right text-slate-700">
-                          {bpStat !== null && bpStat !== undefined ? `LM = ${(bpStat * 1.45).toFixed(2)}` : '--'}
+                          {whiteResult.ok ? `LM = ${whiteResult.stat.toFixed(2)}` : '--'}
                         </td>
                         <td className="py-2.5 px-4 text-right text-slate-700">
-                          {bpP !== null && bpP !== undefined ? Math.min(1.0, bpP * 1.1).toFixed(4) : '--'}
+                          {whiteResult.ok ? whiteResult.p.toFixed(4) : '--'}
                         </td>
                         <td className="py-2.5 pr-4 text-right">
-                          {bpP !== null && bpP !== undefined ? (
+                          {whiteResult.ok ? (
                             <span className={cn(
                               "text-[9px] font-bold uppercase px-2 py-0.5 rounded",
-                              bpP * 1.1 < 0.05 ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              whiteResult.p < 0.05 ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
                             )}>
-                              {bpP * 1.1 < 0.05 ? 'WARN (HETERO)' : 'PASS (HOMO)'}
+                              {whiteResult.p < 0.05 ? 'WARN (HETERO)' : 'PASS (HOMO)'}
                             </span>
                           ) : (
-                            <span className="bg-slate-100 text-slate-500 border border-slate-200 text-[9px] font-bold uppercase px-2 py-0.5 rounded">
+                            <span className="bg-slate-100 text-slate-500 border border-slate-200 text-[9px] font-bold uppercase px-2 py-0.5 rounded" title={whiteResult.reason}>
                               N/A
                             </span>
                           )}
                         </td>
                       </tr>
                       <tr className="border-b border-slate-200">
-                        <td className="py-2.5 px-4 font-bold text-slate-800">Goldfeld-Quandt Diagnostic F-test</td>
+                        <td className="py-2.5 px-4 font-bold text-slate-800" title={!gqResult.ok ? gqResult.reason : undefined}>Goldfeld-Quandt Diagnostic F-test</td>
                         <td className="py-2.5 px-4 text-right text-slate-700">
-                          {bpStat !== null && bpStat !== undefined ? 'F = 1.05' : '--'}
+                          {gqResult.ok ? `F = ${gqResult.stat.toFixed(4)}` : '--'}
                         </td>
                         <td className="py-2.5 px-4 text-right text-slate-700">
-                          {bpStat !== null && bpStat !== undefined ? '0.4120' : '--'}
+                          {gqResult.ok ? gqResult.p.toFixed(4) : '--'}
                         </td>
                         <td className="py-2.5 pr-4 text-right">
-                          {bpStat !== null && bpStat !== undefined ? (
-                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold uppercase px-2 py-0.5 rounded">
-                              PASS (HOMO)
+                          {gqResult.ok ? (
+                            <span className={cn(
+                              "text-[9px] font-bold uppercase px-2 py-0.5 rounded",
+                              gqResult.p < 0.05 ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            )}>
+                              {gqResult.p < 0.05 ? 'WARN (HETERO)' : 'PASS (HOMO)'}
                             </span>
                           ) : (
-                            <span className="bg-slate-100 text-slate-500 border border-slate-200 text-[9px] font-bold uppercase px-2 py-0.5 rounded">
+                            <span className="bg-slate-100 text-slate-500 border border-slate-200 text-[9px] font-bold uppercase px-2 py-0.5 rounded" title={gqResult.reason}>
                               N/A
                             </span>
                           )}
@@ -560,9 +750,16 @@ export function DiagnosticsCenter() {
                   </table>
                 </div>
 
+                {(!whiteResult.ok || !gqResult.ok) && (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-[10px] text-slate-500 font-mono space-y-1">
+                    {!whiteResult.ok && <p>White's test not computable: {whiteResult.reason}</p>}
+                    {!gqResult.ok && <p>Goldfeld-Quandt not computable: {gqResult.reason}</p>}
+                  </div>
+                )}
+
                 <p className="text-xs text-slate-500 font-serif leading-relaxed italic bg-white p-4 border border-slate-200 rounded-lg border-l-4 border-blue-600">
                   {bpP !== null && bpP !== undefined ? (
-                    bpP < 0.05 
+                    bpP < 0.05
                       ? "Warning: Non-constant error variance is flagged. Classical t-tests are biased. It is highly recommended to run the model under 'Robust OLS (HC3)' to ensure correct academic inferences."
                       : "Gauss-Markov homoskedasticity holds. OLS standard errors are BLUE (Best Linear Unbiased Estimator). Classical statistical tests are fully efficient."
                   ) : (
