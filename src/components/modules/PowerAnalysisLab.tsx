@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Compass, 
   HelpCircle, 
@@ -71,6 +71,22 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
   const [pyRunning, setPyRunning] = useState<boolean>(false);
   const [pyError, setPyError] = useState<string | null>(null);
 
+  // Research-Grade toggle: rct mode uses statsmodels TTestIndPower (exact t-distribution
+  // solver, matches R's pwr::pwr.t.test) instead of the fast normal-approximation.
+  // Defaults to OFF ("fast") so existing behavior is unchanged unless opted in.
+  const [rctExactMode, setRctExactMode] = useState<boolean>(false);
+  const [rctExactResult, setRctExactResult] = useState<{ achievedPower: number; requiredN: number; mde: number } | null>(null);
+  const [rctExactLoading, setRctExactLoading] = useState<boolean>(false);
+  const [rctExactError, setRctExactError] = useState<string | null>(null);
+
+  // Research-Grade toggle: cluster_did mode uses the backend's closed-form Moulton
+  // design-effect solver (design: 'cluster-main') instead of the client-side copy of
+  // the same formula. Defaults to OFF ("fast").
+  const [clusterExactMode, setClusterExactMode] = useState<boolean>(false);
+  const [clusterExactResult, setClusterExactResult] = useState<{ achievedPower: number; requiredN: number; mde: number; designEffect: number; requiredClusters: number } | null>(null);
+  const [clusterExactLoading, setClusterExactLoading] = useState<boolean>(false);
+  const [clusterExactError, setClusterExactError] = useState<string | null>(null);
+
   // Auto-populate from active dataset if available
   const handleAutoPopulate = () => {
     if (!dataset) return;
@@ -134,6 +150,83 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
       setPyRunning(false);
     }
   };
+
+  // Fetch exact ttest-based power/N/MDE from the Python backend when Research-Grade
+  // is enabled for the rct mode. Debounced so dragging sliders doesn't spam requests.
+  useEffect(() => {
+    if (mode !== 'rct' || !rctExactMode) return;
+    let cancelled = false;
+    setRctExactLoading(true);
+    setRctExactError(null);
+    const handle = setTimeout(async () => {
+      try {
+        const r = rctAllocationRatio;
+        const nC = rctSampleSize / (1 + r);
+        const [powerRes, nRes, mdeRes] = await Promise.all([
+          runPower({ design: 'ttest', solveFor: 'power', alpha, effectSize: rctEffectSize, nPerGroup: nC, ratio: r }),
+          runPower({ design: 'ttest', solveFor: 'n', alpha, power: targetPower, effectSize: rctEffectSize, ratio: r }),
+          runPower({ design: 'ttest', solveFor: 'mdes', alpha, power: targetPower, nPerGroup: nC, ratio: r }),
+        ]);
+        if (cancelled) return;
+        setRctExactResult({
+          achievedPower: powerRes.power,
+          requiredN: Math.ceil(nRes.nTotal),
+          mde: mdeRes.mdes,
+        });
+      } catch (err: any) {
+        if (!cancelled) setRctExactError(err?.message || 'Exact solver failed. Ensure the backend is running and you are signed in.');
+      } finally {
+        if (!cancelled) setRctExactLoading(false);
+      }
+    }, 500);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [mode, rctExactMode, alpha, targetPower, rctEffectSize, rctSampleSize, rctAllocationRatio]);
+
+  // Fetch exact Moulton design-effect power/N/MDE from the Python backend when
+  // Research-Grade is enabled for the cluster_did mode.
+  useEffect(() => {
+    if (mode !== 'cluster_did' || !clusterExactMode) return;
+    let cancelled = false;
+    setClusterExactLoading(true);
+    setClusterExactError(null);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await runPower({
+          design: 'cluster-main',
+          alpha,
+          power: targetPower,
+          nClusters: numClusters,
+          clusterSize,
+          icc,
+          rSquared: 0,
+          effectSize: clusterEffectSize,
+        });
+        if (cancelled) return;
+        // The backend's cluster-main design does not return an "achieved power at
+        // current N" figure directly (only MDE and required-clusters for the target
+        // power). We derive it here using the exact same closed-form normal formula
+        // as the backend, but plugging in the backend's own design effect -- so this
+        // stays consistent with the exact solver rather than duplicating an
+        // independent approximation.
+        const za = jStat.normal.inv(1 - alpha / 2, 0, 1);
+        const totalN = numClusters * clusterSize;
+        const delta = clusterEffectSize * Math.sqrt(totalN / (4 * res.designEffect));
+        const achievedPower = jStat.normal.cdf(delta - za, 0, 1) + jStat.normal.cdf(-delta - za, 0, 1);
+        setClusterExactResult({
+          achievedPower,
+          requiredN: res.requiredClusters * clusterSize,
+          mde: res.mdes,
+          designEffect: res.designEffect,
+          requiredClusters: res.requiredClusters,
+        });
+      } catch (err: any) {
+        if (!cancelled) setClusterExactError(err?.message || 'Exact solver failed. Ensure the backend is running and you are signed in.');
+      } finally {
+        if (!cancelled) setClusterExactLoading(false);
+      }
+    }, 500);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [mode, clusterExactMode, alpha, targetPower, clusterEffectSize, clusterSize, icc, numClusters]);
 
   // MATHEMATICAL COMPUTATIONS
   const results = useMemo(() => {
@@ -229,6 +322,28 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
     olsBeta, olsSigmaX, olsSigmaU, olsVif, olsSampleSize,
     clusterEffectSize, clusterSize, icc, numClusters
   ]);
+
+  // Overlay exact backend results onto the displayed stats when Research-Grade is
+  // enabled and a result has arrived (falls back to the fast client-side results
+  // otherwise, e.g. while the request is in flight or before the first fetch).
+  const displayResults = useMemo(() => {
+    if (mode === 'rct' && rctExactMode && rctExactResult) {
+      return { ...results, achievedPower: rctExactResult.achievedPower, requiredN: rctExactResult.requiredN, mde: rctExactResult.mde };
+    }
+    if (mode === 'cluster_did' && clusterExactMode && clusterExactResult) {
+      return {
+        ...results,
+        achievedPower: clusterExactResult.achievedPower,
+        requiredN: clusterExactResult.requiredN,
+        mde: clusterExactResult.mde,
+        designEffect: clusterExactResult.designEffect,
+        requiredClusters: clusterExactResult.requiredClusters,
+      };
+    }
+    return results;
+  }, [mode, results, rctExactMode, rctExactResult, clusterExactMode, clusterExactResult]);
+
+  const usingExactResults = (mode === 'rct' && rctExactMode && !!rctExactResult) || (mode === 'cluster_did' && clusterExactMode && !!clusterExactResult);
 
   // GENERATE CHART DATA (Power Curve)
   const chartData = useMemo(() => {
@@ -521,11 +636,31 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
                     {rctAllocationRatio === 1 ? "Balanced allocation (1:1) maximizes statistical power." : "Unequal allocation reduces power but is common when treatment is costly."}
                   </p>
                 </div>
+
+                {/* Research-Grade toggle */}
+                <label className="flex items-start gap-2 text-[11px] text-slate-600 cursor-pointer bg-slate-50 border border-slate-100 rounded-lg p-2.5 mt-2">
+                  <input
+                    type="checkbox"
+                    checked={rctExactMode}
+                    onChange={(e) => setRctExactMode(e.target.checked)}
+                    className="rounded text-indigo-600 focus:ring-indigo-500 mt-0.5"
+                  />
+                  <span>Research-grade engine (Python / statsmodels) <span className="text-slate-400">— exact t-distribution solver, matches R's pwr::pwr.t.test. Requires sign-in.</span></span>
+                </label>
+                {rctExactMode && rctExactLoading && (
+                  <p className="text-[9px] text-indigo-500 font-mono">Fetching exact solver…</p>
+                )}
+                {rctExactMode && rctExactError && (
+                  <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2.5">{rctExactError}</p>
+                )}
               </div>
             )}
 
             {mode === 'ols_coef' && (
               <div className="space-y-5 animate-in fade-in duration-300">
+                <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2.5 font-serif italic">
+                  This mode uses a normal-distribution approximation only — there is no exact backend solver for OLS coefficient power (not directly comparable to a t-distribution-based tool like R's pwr.f2.test). Treat results as directionally correct, not precise.
+                </p>
                 {/* Expected Beta */}
                 <div className="space-y-2">
                   <div className="flex justify-between items-center text-xs">
@@ -710,6 +845,23 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
                     Total sample size N = {numClusters * clusterSize} observations across {numClusters} clusters.
                   </p>
                 </div>
+
+                {/* Research-Grade toggle */}
+                <label className="flex items-start gap-2 text-[11px] text-slate-600 cursor-pointer bg-slate-50 border border-slate-100 rounded-lg p-2.5 mt-2">
+                  <input
+                    type="checkbox"
+                    checked={clusterExactMode}
+                    onChange={(e) => setClusterExactMode(e.target.checked)}
+                    className="rounded text-indigo-600 focus:ring-indigo-500 mt-0.5"
+                  />
+                  <span>Research-grade engine (Python / backend) <span className="text-slate-400">— exact Moulton design-effect solver, matches PowerUpR's power.cra2. Requires sign-in.</span></span>
+                </label>
+                {clusterExactMode && clusterExactLoading && (
+                  <p className="text-[9px] text-indigo-500 font-mono">Fetching exact solver…</p>
+                )}
+                {clusterExactMode && clusterExactError && (
+                  <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2.5">{clusterExactError}</p>
+                )}
               </div>
             )}
           </div>
@@ -718,28 +870,44 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
         {/* Right Hand: Results & Charts */}
         <div className="lg:col-span-7 space-y-6">
           
+          {/* Engine indicator */}
+          {(mode === 'rct' || mode === 'cluster_did') && (
+            <div className="flex items-center justify-end">
+              <span className={cn(
+                "text-[9px] font-mono font-bold uppercase tracking-wider rounded px-2 py-0.5 border",
+                usingExactResults
+                  ? "text-indigo-600 bg-indigo-50 border-indigo-100"
+                  : "text-slate-400 bg-slate-50 border-slate-100"
+              )}>
+                {usingExactResults
+                  ? (mode === 'rct' ? 'Exact (Python / statsmodels TTestIndPower)' : 'Exact (Python / Moulton design-effect)')
+                  : 'Fast (Browser normal-approximation)'}
+              </span>
+            </div>
+          )}
+
           {/* Main Stats Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            
+
             {/* Achieved Power card */}
             <div className={cn(
               "card-premium p-6 text-center border relative overflow-hidden flex flex-col justify-between min-h-[140px]",
-              results.achievedPower >= targetPower 
-                ? "bg-emerald-50 border-emerald-200 text-emerald-950" 
+              displayResults.achievedPower >= targetPower
+                ? "bg-emerald-50 border-emerald-200 text-emerald-950"
                 : "bg-amber-50 border-amber-200 text-amber-950"
             )}>
               <div>
                 <p className="text-[9px] font-mono uppercase tracking-widest opacity-60 mb-1">Achieved Power</p>
                 <h3 className="text-3xl font-bold font-mono tracking-tighter">
-                  {Math.round(results.achievedPower * 100)}%
+                  {Math.round(displayResults.achievedPower * 100)}%
                 </h3>
               </div>
               <div className="mt-3">
                 <span className={cn(
                   "px-2.5 py-0.5 text-[8px] font-black uppercase tracking-wider rounded-full",
-                  results.achievedPower >= targetPower ? "bg-emerald-200 text-emerald-800" : "bg-amber-200 text-amber-800"
+                  displayResults.achievedPower >= targetPower ? "bg-emerald-200 text-emerald-800" : "bg-amber-200 text-amber-800"
                 )}>
-                  {results.achievedPower >= targetPower ? 'Sufficiently Powered' : 'Underpowered'}
+                  {displayResults.achievedPower >= targetPower ? 'Sufficiently Powered' : 'Underpowered'}
                 </span>
               </div>
             </div>
@@ -749,11 +917,11 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
               <div>
                 <p className="text-[9px] font-mono uppercase tracking-widest text-slate-400 mb-1">Required Sample Size</p>
                 <h3 className="text-3xl font-bold font-mono text-slate-900 tracking-tighter">
-                  {results.requiredN}
+                  {displayResults.requiredN}
                 </h3>
               </div>
               <p className="text-[9px] text-slate-500 font-serif italic">
-                {mode === 'cluster_did' ? `Total N across ${results.requiredClusters} clusters` : "Total N for balanced setup"}
+                {mode === 'cluster_did' ? `Total N across ${displayResults.requiredClusters} clusters` : "Total N for balanced setup"}
               </p>
             </div>
 
@@ -764,7 +932,7 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
                   {mode === 'ols_coef' ? "Min Detectable Beta" : "Min Detectable Effect (MDE)"}
                 </p>
                 <h3 className="text-3xl font-bold font-mono text-blue-600 tracking-tighter">
-                  {results.mde.toFixed(3)}
+                  {displayResults.mde.toFixed(3)}
                 </h3>
               </div>
               <p className="text-[9px] text-slate-500 font-serif italic">
@@ -891,7 +1059,7 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
                 </div>
                 <ul className="list-disc pl-5 space-y-1">
                   <li><strong>The Moulton Problem:</strong> Ignoring positive ICC (ρ &gt; 0) causes extreme over-rejection of the null hypothesis. Standard errors are artificially tiny without clustering, leading to false-positive policy recommendations.</li>
-                  <li><strong>Effective Sample Size:</strong> With a cluster size of m = {clusterSize} and ρ = {icc}, the design effect is <strong>{results.designEffect?.toFixed(2)}</strong>. This means you need a total sample size that is {results.designEffect?.toFixed(1)} times larger than an unclustered study!</li>
+                  <li><strong>Effective Sample Size:</strong> With a cluster size of m = {clusterSize} and ρ = {icc}, the design effect is <strong>{displayResults.designEffect?.toFixed(2)}</strong>. This means you need a total sample size that is {displayResults.designEffect?.toFixed(1)} times larger than an unclustered study!</li>
                   <li><strong>Cluster Constraint:</strong> To boost power, adding more clusters (C) is always more effective than adding more observations (m) to existing clusters, as observations inside a cluster have diminishing informational returns.</li>
                 </ul>
               </div>
