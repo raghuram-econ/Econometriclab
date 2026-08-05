@@ -24,10 +24,20 @@ export async function signInWithGoogle() {
 
 export async function signInAsGuest() {
   try {
-    const result = await signInAnonymously(auth);
+    // signInAnonymously can hang indefinitely (rather than reject) if the
+    // Firebase project's auth/Firestore backend is unreachable or
+    // misconfigured -- race it against a timeout so "Continue as Guest"
+    // always resolves within a bounded time instead of getting stuck on
+    // "Launching Sandbox..." forever.
+    const result = await Promise.race([
+      signInAnonymously(auth),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('signInAnonymously timed out')), 6000)
+      ),
+    ]);
     return result.user;
   } catch (error) {
-    console.warn('Firebase anonymous sign-in failed or disabled, falling back to local mock user:', error);
+    console.warn('Firebase anonymous sign-in failed, disabled, or timed out -- falling back to local mock user:', error);
     const mockUser = {
       uid: 'guest-scholar',
       email: 'guest@econometricslab.org',
