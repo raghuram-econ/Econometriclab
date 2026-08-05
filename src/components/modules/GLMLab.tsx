@@ -16,9 +16,8 @@ import { Dataset } from '../../types';
 import { generateMasterDataset } from '../../lib/dataGenerators';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
 import { runPoissonMLE, runNegBinomialMLE } from '../../lib/econometrics/count';
+import { estimateModel } from '../../lib/econometrics/estimators';
 import ShowCode from '../shared/ShowCode';
-import jStat from 'jstat';
-import * as math from 'mathjs';
 import { runMarginalEffects } from '../../services/apiClient';
 
 interface GLMLabProps {
@@ -147,225 +146,38 @@ export default function GLMLab({ dataset: propDataset, onRunComplete }: GLMLabPr
             onRunComplete(finalResults, `${modelName.toUpperCase()}: ${finalResults.specification}`);
           }
         } else {
-          // Logit or Probit model
+          // Logit or Probit model - delegates to the tested estimateModel IRLS/Newton solver
           const modelName = family === 'logit' ? 'Logit' : 'Probit';
           const data = activeDataset.data || [];
-          // CRASH GUARD ADDED
-          const yRaw = (data || []).map(r => Number(r[yVar]));
-          
-          // Check Y is binary
-          const uniqueY = Array.from(new Set(yRaw)).sort((a, b) => a - b);
-          if (uniqueY.length !== 2) {
-            throw new Error(`Dependent variable must be binary (have exactly 2 unique values). '${yVar}' has ${uniqueY.length} unique values.`);
-          }
 
-          // CRASH GUARD ADDED
-          const n = (data || []).length;
-          // CRASH GUARD ADDED
-          const k = (xVars || []).length + 1; // Predictors + Intercept
-
-          // Filter valid rows
-          // CRASH GUARD ADDED
-          const validRows = (data || []).filter(row => {
-            return [yVar, ...(xVars || [])].every(v => row[v] !== undefined && row[v] !== null && !isNaN(Number(row[v])));
+          const result = estimateModel(modelName as 'Logit' | 'Probit', {
+            data,
+            yVar,
+            xVars,
+            includeIntercept: true
           });
 
           // CRASH GUARD ADDED
-          if ((validRows || []).length < k + 5) {
-            throw new Error('Insufficient observations for estimation.');
-          }
-
-          // CRASH GUARD ADDED
-          const Y = (validRows || []).map(r => Number(r[yVar]) === uniqueY[1] ? 1 : 0);
-          const uniqueCleanY = Array.from(new Set(Y));
-          if (uniqueCleanY.length < 2) {
-            throw new Error("Outcome does not vary; the dependent variable is constant in the estimation sample.");
-          }
-          // CRASH GUARD ADDED
-          const X = (validRows || []).map(row => {
-            // CRASH GUARD ADDED
-            const rowVals = (xVars || []).map(v => Number(row[v]));
-            return [1, ...rowVals]; // Add intercept
-          });
-
-          // Initialize Beta as zeros
-          let beta = Array(k).fill(0);
-          let converged = false;
-          let iter = 0;
-          const maxIter = 50;
-
-          // Fisher Scoring / Newton Raphson Loop
-          while (!converged && iter < maxIter) {
-            iter++;
-            // CRASH GUARD ADDED
-            const z = (X || []).map(row => {
-              // CRASH GUARD ADDED
-              return (row || []).reduce((sum, val, idx) => sum + val * beta[idx], 0);
-            });
-
-            let pNew: number[] = [];
-            let weights: number[] = [];
-
-            if (family === 'logit') {
-              // CRASH GUARD ADDED
-              pNew = (z || []).map(zi => {
-                const pi = 1 / (1 + Math.exp(-zi));
-                return Math.max(1e-9, Math.min(1 - 1e-9, pi));
-              });
-              // CRASH GUARD ADDED
-              weights = (pNew || []).map(pi => pi * (1 - pi));
-            } else {
-              // CRASH GUARD ADDED
-              pNew = (z || []).map(zi => {
-                const pi = jStat.normal.cdf(zi, 0, 1);
-                return Math.max(1e-9, Math.min(1 - 1e-9, pi));
-              });
-              // CRASH GUARD ADDED
-              weights = (z || []).map((zi, idx) => {
-                const pdf = jStat.normal.pdf(zi, 0, 1);
-                const pi = pNew[idx] ?? 0.5;
-                return (pdf * pdf) / (pi * (1 - pi) || 1e-6);
-              });
-            }
-
-            const H = Array(k).fill(0).map(() => Array(k).fill(0));
-            const G = Array(k).fill(0);
-
-            // CRASH GUARD ADDED
-            for (let i = 0; i < (validRows || []).length; i++) {
-              const xi = X[i];
-              const yi = Y[i] ?? 0;
-              const pi = pNew[i] ?? 0.5;
-              const wi = weights[i] ?? 0.25;
-              if (!xi) continue;
-
-              let dLi_dZi = 0;
-              if (family === 'logit') {
-                dLi_dZi = yi - pi;
-              } else {
-                const pdf = jStat.normal.pdf(z[i] ?? 0, 0, 1);
-                dLi_dZi = (yi - pi) * pdf / (pi * (1 - pi) || 1e-6);
-              }
-
-              for (let j = 0; j < k; j++) {
-                G[j] += (xi[j] ?? 0) * dLi_dZi;
-                for (let l = 0; l < k; l++) {
-                  const rowH = H[j];
-                  if (rowH) {
-                    rowH[l] += (xi[j] ?? 0) * wi * (xi[l] ?? 0);
-                  }
-                }
-              }
-            }
-
-            const H_inv = math.inv(H) as any;
-            const deltaBeta = math.multiply(H_inv, G) as any as number[];
-
-            // CRASH GUARD ADDED
-            beta = (beta || []).map((b, idx) => b + (deltaBeta[idx] ?? 0));
-
-            // CRASH GUARD ADDED
-            const norm = (deltaBeta || []).reduce((sum, val) => sum + Math.abs(val ?? 0), 0);
-            if (norm < 1e-6) {
-              converged = true;
-            }
-          }
-
-          // CRASH GUARD ADDED
-          const finalZ = (X || []).map(row => (row || []).reduce((sum, val, idx) => sum + val * (beta[idx] ?? 0), 0));
-          let finalP: number[] = [];
-          let finalW: number[] = [];
-          if (family === 'logit') {
-            // CRASH GUARD ADDED
-            finalP = (finalZ || []).map(zi => Math.max(1e-9, Math.min(1 - 1e-9, 1 / (1 + Math.exp(-zi)))));
-            // CRASH GUARD ADDED
-            finalW = (finalP || []).map(pi => pi * (1 - pi));
-          } else {
-            // CRASH GUARD ADDED
-            finalP = (finalZ || []).map(zi => Math.max(1e-9, Math.min(1 - 1e-9, jStat.normal.cdf(zi, 0, 1))));
-            // CRASH GUARD ADDED
-            finalW = (finalZ || []).map((zi, idx) => {
-              const pdf = jStat.normal.pdf(zi, 0, 1);
-              const pi = finalP[idx] ?? 0.5;
-              return (pdf * pdf) / (pi * (1 - pi) || 1e-6);
-            });
-          }
-
-          const finalH = Array(k).fill(0).map(() => Array(k).fill(0));
-          // CRASH GUARD ADDED
-          for (let i = 0; i < (validRows || []).length; i++) {
-            const xi = X[i];
-            const wi = finalW[i] ?? 0.25;
-            if (!xi) continue;
-            for (let j = 0; j < k; j++) {
-              for (let l = 0; l < k; l++) {
-                const rowH = finalH[j];
-                if (rowH) {
-                  rowH[l] += (xi[j] ?? 0) * wi * (xi[l] ?? 0);
-                }
-              }
-            }
-          }
-          const varCov = math.inv(finalH) as any;
-
-          let logLikelihood = 0;
-          // CRASH GUARD ADDED
-          for (let i = 0; i < (Y || []).length; i++) {
-            const pi = finalP[i] ?? 0.5;
-            const y_val = Y[i] ?? 0;
-            logLikelihood += y_val * Math.log(pi || 1e-6) + (1 - y_val) * Math.log(1 - pi || 1e-6);
-          }
-
-          // CRASH GUARD ADDED
-          const meanY = ((Y || []) as number[]).reduce((sum, v) => sum + (v ?? 0), 0) / (Y || []).length;
-          let nullLL = 0;
-          // CRASH GUARD ADDED
-          for (let i = 0; i < (Y || []).length; i++) {
-            const y_val = Y[i] ?? 0;
-            nullLL += y_val * Math.log(meanY || 1e-6) + (1 - y_val) * Math.log(1 - meanY || 1e-6);
-          }
-
-          const mcfaddenR2 = 1 - (logLikelihood / (nullLL || 1e-10));
-          const aic = -2 * logLikelihood + 2 * k;
-          // CRASH GUARD ADDED
-          const bic = -2 * logLikelihood + k * Math.log((Y || []).length);
-
-          const labels = ['Intercept', ...(xVars || [])];
-          // CRASH GUARD ADDED
-          const coefficients = (labels || []).map((label, idx) => {
-            const estimate = beta[idx] ?? 0;
-            const stdError = Math.sqrt(varCov[idx]?.[idx] ?? 1e-10);
-            const zStat = estimate / stdError;
-            const pValue = 2 * (1 - jStat.normal.cdf(Math.abs(zStat), 0, 1));
-            
-            let starsVal = "";
-            if (pValue < 0.01) starsVal = "***";
-            else if (pValue < 0.05) starsVal = "**";
-            else if (pValue < 0.10) starsVal = "*";
-
-            return {
-              variable: label,
-              estimate,
-              stdError,
-              zStat,
-              pValue,
-              stars: starsVal
-            };
-          });
+          const mappedCoefficients = (result.coefficients || []).map(c => ({
+            variable: c.variable,
+            estimate: c.estimate,
+            stdError: c.stdError,
+            zStat: c.tStat,
+            pValue: c.pValue,
+            stars: c.stars || ''
+          }));
 
           const stats = {
-            // CRASH GUARD ADDED
-            obs: (Y || []).length,
-            // CRASH GUARD ADDED
-            df: (Y || []).length - k,
-            logLikelihood,
-            aic,
-            bic,
-            pseudoR2: mcfaddenR2
+            obs: result.n,
+            df: result.df,
+            logLikelihood: result.logLikelihood,
+            aic: result.aic,
+            bic: result.bic,
+            pseudoR2: result.rSquared // estimateModel reports Logit/Probit rSquared as McFadden pseudo R^2
           };
 
           const finalResults = {
-            coefficients,
+            coefficients: mappedCoefficients,
             stats,
             family: modelName,
             specification: `${yVar.toUpperCase()} ~ ${xVars.join(' + ')}`
@@ -377,7 +189,19 @@ export default function GLMLab({ dataset: propDataset, onRunComplete }: GLMLabPr
             onRunComplete(finalResults, `${modelName.toUpperCase()}: ${finalResults.specification}`);
           }
 
-          // Fetch publication-ready Average Marginal Effects (AME) from Python statsmodels
+          // Fetch publication-ready Average Marginal Effects (AME) from Python statsmodels.
+          // Rebuild the same 0/1-coded Y, intercept-augmented X, and labels the AME
+          // backend expects - estimateModel doesn't return these, they're recomputed
+          // here purely to feed the backend call.
+          const validRows = (data || []).filter(row =>
+            [yVar, ...(xVars || [])].every(v => row[v] !== undefined && row[v] !== null && !isNaN(Number(row[v])))
+          );
+          const yRaw = validRows.map(r => Number(r[yVar]));
+          const uniqueY = Array.from(new Set(yRaw)).sort((a, b) => a - b);
+          const Y = yRaw.map(v => (v === uniqueY[1] ? 1 : 0));
+          const X = validRows.map(row => [1, ...(xVars || []).map(v => Number(row[v]))]);
+          const labels = ['Intercept', ...(xVars || [])];
+
           setAmeLoading(true);
           runMarginalEffects({
             model_type: family,

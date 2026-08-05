@@ -13,11 +13,11 @@ import {
 } from 'lucide-react';
 import { runOLS } from '../../lib/econometrics/ols';
 import { runTobitMLE } from '../../lib/econometrics/tobit';
+import { estimateModel } from '../../lib/econometrics/estimators';
 import { Dataset, AnalysisResult } from '../../types';
 import { cn, fmt, fmtP, stars } from '../../lib/utils';
 import jStat from 'jstat';
 import ShowCode from '../shared/ShowCode';
-import * as math from 'mathjs';
 import { runMarginalEffects } from '../../services/apiClient';
 
 interface LimitedDependentProps {
@@ -118,37 +118,41 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
     );
   }
 
-  // --- LOGIT / PROBIT SOLVER (IRLS METHOD) ---
+  // --- LOGIT / PROBIT ESTIMATION (delegates to the tested estimateModel IRLS/Newton solver) ---
   const handleEstimateLp = async () => {
     if (!lpOutcome || lpPredictors.length === 0) return;
     setLpIsEstimating(true);
-    
+
     // Allow brief render before computation
     setTimeout(() => {
       try {
         const data = dataset.data || [];
-        const yRaw = data.map(r => encodeBinaryY(r[lpOutcome], lpOutcome));
-
-        // Check Y is binary
-        const uniqueY = Array.from(new Set(yRaw));
-        const isBinary = uniqueY.every(val => val === 0 || val === 1);
-        if (!isBinary) {
-          throw new Error('Dependent variable is not strictly binary (0 or 1). Logit/Probit requires a dichotomous outcome.');
-        }
-
-        const n = data.length;
         const k = lpPredictors.length + 1; // Predictors + Intercept
 
-        // Filter valid rows
+        // encodeBinaryY handles both numeric 0/1 columns and categorical
+        // (e.g. yes/no) columns via binaryCodebook. estimateModel does its own
+        // numeric parsing/cleaning, so we pre-encode the outcome onto a
+        // dedicated numeric field it can consume directly.
+        const transformedData = data.map(row => ({
+          ...row,
+          __lp_y: encodeBinaryY(row[lpOutcome], lpOutcome)
+        }));
+
+        const result = estimateModel(lpModelType === 'logit' ? 'Logit' : 'Probit', {
+          data: transformedData,
+          yVar: '__lp_y',
+          xVars: lpPredictors,
+          includeIntercept: true
+        });
+
+        // Recover the same clean rows/labels used above, purely to compute the
+        // UI-only Marginal Effect at the Mean (MEM) and to feed the Python AME
+        // backend call below - estimateModel does not return either of these.
         const validRows = data.filter(row => {
           const yOk = !isNaN(encodeBinaryY(row[lpOutcome], lpOutcome));
           const xOk = lpPredictors.every(v => row[v] !== undefined && row[v] !== null && !isNaN(Number(row[v])));
           return yOk && xOk;
         });
-
-        if (validRows.length < k + 5) {
-          throw new Error('Insufficient observations for estimation.');
-        }
 
         const Y = validRows.map(r => encodeBinaryY(r[lpOutcome], lpOutcome));
         const X = validRows.map(row => {
@@ -156,144 +160,9 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
           return [1, ...rowVals]; // Add intercept
         });
 
-        // Initialize Beta as zeros
-        let beta = Array(k).fill(0);
-        let converged = false;
-        let iter = 0;
-        const maxIter = 50;
-        let p = Array(n).fill(0.5);
-
-        // Fisher Scoring / Newton Raphson Loop
-        while (!converged && iter < maxIter) {
-          iter++;
-          const z = X.map(row => {
-            return row.reduce((sum, val, idx) => sum + val * beta[idx], 0);
-          });
-
-        let pNew: number[] = [];
-        let weights: number[] = [];
-        let grads: number[] = [];
-
-        if (lpModelType === 'logit') {
-          // Sigmoid probabilities
-          pNew = z.map(zi => {
-            const pi = 1 / (1 + Math.exp(-zi));
-            return Math.max(1e-9, Math.min(1 - 1e-9, pi));
-          });
-          weights = pNew.map(pi => pi * (1 - pi));
-        } else {
-          // Probit probabilities (Standard Normal CDF)
-          pNew = z.map(zi => {
-            const pi = jStat.normal.cdf(zi, 0, 1);
-            return Math.max(1e-9, Math.min(1 - 1e-9, pi));
-          });
-          // Weights for Probit scoring: pdf(z)^2 / (p*(1-p))
-          weights = z.map((zi, idx) => {
-            const pdf = jStat.normal.pdf(zi, 0, 1);
-            const pi = pNew[idx] ?? 0.5;
-            return (pdf * pdf) / (pi * (1 - pi));
-          });
-        }
-
-          // Build Hessian matrix and Gradient vector
-          const H = Array(k).fill(0).map(() => Array(k).fill(0));
-          const G = Array(k).fill(0);
-
-          for (let i = 0; i < validRows.length; i++) {
-            const xi = X[i];
-            const yi = Y[i] ?? 0;
-            const pi = pNew[i] ?? 0.5;
-            const wi = weights[i] ?? 0.25;
-            if (!xi) continue;
-
-            // Accumulate Gradient
-            let dLi_dZi = 0;
-            if (lpModelType === 'logit') {
-              dLi_dZi = yi - pi;
-            } else {
-              const pdf = jStat.normal.pdf(z[i] ?? 0, 0, 1);
-              dLi_dZi = (yi - pi) * pdf / (pi * (1 - pi) || 1e-6);
-            }
-
-            for (let j = 0; j < k; j++) {
-              G[j] += (xi[j] ?? 0) * dLi_dZi;
-              for (let l = 0; l < k; l++) {
-                const rowH = H[j];
-                if (rowH) {
-                  rowH[l] += (xi[j] ?? 0) * wi * (xi[l] ?? 0);
-                }
-              }
-            }
-          }
-
-          // Update Beta: beta_new = beta + H^-1 * G
-          const H_inv = math.inv(H) as any;
-          const deltaBeta = math.multiply(H_inv, G) as any as number[];
-
-          beta = beta.map((b, idx) => b + deltaBeta[idx]);
-
-          // Check convergence
-          const norm = deltaBeta.reduce((sum, val) => sum + Math.abs(val), 0);
-          if (norm < 1e-6) {
-            converged = true;
-          }
-          p = pNew;
-        }
-
-        // Final Variance-Covariance Matrix (Inverse Hessian)
-        const finalZ = X.map(row => row.reduce((sum, val, idx) => sum + val * (beta[idx] ?? 0), 0));
-        let finalP: number[] = [];
-        let finalW: number[] = [];
-        if (lpModelType === 'logit') {
-          finalP = finalZ.map(zi => Math.max(1e-9, Math.min(1 - 1e-9, 1 / (1 + Math.exp(-zi)))));
-          finalW = finalP.map(pi => pi * (1 - pi));
-        } else {
-          finalP = finalZ.map(zi => Math.max(1e-9, Math.min(1 - 1e-9, jStat.normal.cdf(zi, 0, 1))));
-          finalW = finalZ.map((zi, idx) => {
-            const pdf = jStat.normal.pdf(zi, 0, 1);
-            const pi = finalP[idx] ?? 0.5;
-            return (pdf * pdf) / (pi * (1 - pi) || 1e-6);
-          });
-        }
-
-        const finalH = Array(k).fill(0).map(() => Array(k).fill(0));
-        for (let i = 0; i < validRows.length; i++) {
-          const xi = X[i];
-          const wi = finalW[i] ?? 0.25;
-          if (!xi) continue;
-          for (let j = 0; j < k; j++) {
-            for (let l = 0; l < k; l++) {
-              const rowH = finalH[j];
-              if (rowH) {
-                rowH[l] += (xi[j] ?? 0) * wi * (xi[l] ?? 0);
-              }
-            }
-          }
-        }
-        const varCov = math.inv(finalH) as any;
-
-        // Statistics
-        let logLikelihood = 0;
-        for (let i = 0; i < Y.length; i++) {
-          const pi = finalP[i] ?? 0.5;
-          const yi = Y[i] ?? 0;
-          logLikelihood += yi * Math.log(pi) + (1 - yi) * Math.log(1 - pi);
-        }
-
-        const meanY = Y.reduce((sum, v) => sum + (v ?? 0), 0) / (Y.length || 1);
-        let nullLL = 0;
-        for (let i = 0; i < Y.length; i++) {
-          const yi = Y[i] ?? 0;
-          nullLL += yi * Math.log(meanY || 1e-6) + (1 - yi) * Math.log(1 - meanY || 1e-6);
-        }
-
-        const mcfaddenR2 = 1 - (logLikelihood / (nullLL || 1e-10));
-        const aic = -2 * logLikelihood + 2 * k;
-        const bic = -2 * logLikelihood + k * Math.log(Y.length || 1);
-
-        // Coefficients Table Setup
         const labels = ['Intercept', ...lpPredictors];
-        
+        const betaByLabel = new Map(result.coefficients.map(c => [c.variable, c.estimate]));
+
         // Calculate Means of Predictors for MEM
         const meansX = Array(k).fill(0);
         meansX[0] = 1.0; // Intercept mean
@@ -303,7 +172,7 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
         });
 
         // Compute Linear Prediction at the Mean
-        const indexAtMean = meansX.reduce((sum, val, idx) => sum + val * beta[idx], 0);
+        const indexAtMean = meansX.reduce((sum, val, idx) => sum + val * (betaByLabel.get(labels[idx] ?? '') ?? 0), 0);
         let scaleFactor = 0;
         if (lpModelType === 'logit') {
           const probAtMean = 1 / (1 + Math.exp(-indexAtMean));
@@ -312,38 +181,27 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
           scaleFactor = jStat.normal.pdf(indexAtMean, 0, 1);
         }
 
-        const coefficients = labels.map((label, idx) => {
-          const estimate = beta[idx];
-          const stdError = Math.sqrt(varCov[idx][idx]);
-          const zStat = estimate / stdError;
-          const pValue = 2 * (1 - jStat.normal.cdf(Math.abs(zStat), 0, 1));
-          
-          // Marginal Effect at Mean
-          const mem = idx === 0 ? null : estimate * scaleFactor;
-
-          return {
-            variable: label,
-            estimate,
-            stdError,
-            zStat,
-            pValue,
-            confLow: estimate - 1.96 * stdError,
-            confHigh: estimate + 1.96 * stdError,
-            mem
-          };
-        });
+        const coefficients = result.coefficients.map((c, idx) => ({
+          variable: c.variable,
+          estimate: c.estimate,
+          stdError: c.stdError,
+          zStat: c.tStat,
+          pValue: c.pValue,
+          confLow: c.confLow,
+          confHigh: c.confHigh,
+          // Marginal Effect at Mean (UI-only quantity, not returned by estimateModel)
+          mem: idx === 0 ? null : c.estimate * scaleFactor
+        }));
 
         const results = {
           coefficients,
-          logLikelihood,
-          nullLL,
-          mcfaddenR2,
-          aic,
-          bic,
-          n: Y.length,
+          logLikelihood: result.logLikelihood,
+          mcfaddenR2: result.rSquared, // estimateModel already reports Logit/Probit rSquared as McFadden pseudo R^2
+          aic: result.aic,
+          bic: result.bic,
+          n: result.n,
           k,
-          converged,
-          iterations: iter,
+          df: result.df,
           type: lpModelType
         };
 
@@ -441,8 +299,10 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
 
       // We approximate by running binary logits for each cut-point: cumulative threshold method
       // e.g., for categories [1, 2, 3], cut-points are at >=2 and >=3
+      // Each cut-point is a genuine Logit fit (via the shared estimateModel IRLS solver -
+      // the same estimator used by the Logit/Probit tab), not a linear probability model.
       const cutpointsResults: any[] = [];
-      
+
       for (let idx = 1; idx < categories.length; idx++) {
         const thresholdVal = categories[idx];
         if (thresholdVal === undefined) continue;
@@ -451,12 +311,17 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
           binary_y: Number(r[orderedOutcome]) >= thresholdVal ? 1 : 0
         }));
 
-        // Fit linear probability model or quick logit proxy
-        // Since we want standard errors and estimates, we run a fast regression
-        const olsProxy = runOLS(binaryData, 'binary_y', orderedPredictors, true, true);
+        // Fit a real binary Logit at this cut-point so the "Binary Logit Proxy"
+        // label is accurate (estimateModel does its own numeric parsing/cleaning).
+        const logitProxy = estimateModel('Logit', {
+          data: binaryData,
+          yVar: 'binary_y',
+          xVars: orderedPredictors,
+          includeIntercept: true
+        });
         cutpointsResults.push({
           threshold: `Y >= ${thresholdVal}`,
-          olsProxy
+          logitProxy
         });
       }
 
@@ -623,8 +488,8 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                     </span>
                   </div>
                   <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
-                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">MLE Iterations</span>
-                    <span className="text-sm font-serif font-bold text-stone-800">{lpResult.iterations} ({lpResult.converged ? 'converged' : 'no conv.'})</span>
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Observations</span>
+                    <span className="text-sm font-serif font-bold text-stone-800">{lpResult.n} (df={lpResult.df})</span>
                   </div>
                 </div>
 
@@ -1029,7 +894,7 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                               </tr>
                             </thead>
                             <tbody>
-                              {cp.olsProxy.coefficients.map((coef: any) => (
+                              {cp.logitProxy.coefficients.map((coef: any) => (
                                 <tr key={coef.variable}>
                                   <td className="font-mono text-xs">{coef.variable}</td>
                                   <td className="text-right">{fmt(coef.estimate)}</td>

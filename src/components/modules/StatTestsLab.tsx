@@ -17,7 +17,7 @@ import { generateMasterDataset } from '../../lib/dataGenerators';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
 import jStat from 'jstat';
 import * as math from 'mathjs';
-import { approximateADFPValue, runKPSSTest, runPhillipsPerronTest } from '../../lib/econometrics/arima';
+import { runADFTest, runKPSSTest, runPhillipsPerronTest } from '../../lib/econometrics/arima';
 import { runUnitRoot } from '../../services/apiClient';
 
 interface StatTestsLabProps {
@@ -170,73 +170,21 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
           });
         } 
         else if (testType === 'stationarity') {
-          // Augmented Dickey-Fuller (ADF) approximation
-          // Let's run a real Dickey-Fuller regression: dy = alpha + beta * y_{t-1} + gamma * dy_{t-1} + e
-          const dy: number[] = [];
-          const y_lag1: number[] = [];
-          const dy_lag1: number[] = [];
-
-          for (let t = 2; t < N; t++) {
-            const current = values[t] ?? 0;
-            const prev = values[t-1] ?? 0;
-            const prev2 = values[t-2] ?? 0;
-
-            dy.push(current - prev);
-            y_lag1.push(prev);
-            dy_lag1.push(prev - prev2);
-          }
-
-          // Build regression matrix
-          // dy = b0 + b1 * y_lag1 + b2 * dy_lag1
-          const Y = dy;
-          const X = y_lag1.map((val, idx) => [1, val, dy_lag1[idx] ?? 0]) as any as number[][];
-
-          const k = 3;
-          const n_reg = Y.length;
-
-          const Xt = math.transpose(X);
-          const XtX = math.multiply(Xt, X);
-          const XtX_inv = math.inv(XtX as any) as any as number[][];
-          const XtY = math.multiply(Xt, Y);
-          const beta = math.multiply(XtX_inv, XtY) as any as number[];
-
-          const Y_hat = math.multiply(X, beta) as any as number[];
-          const residuals = Y.map((val, i) => val - (Y_hat[i] ?? 0));
-          const rss = residuals.reduce((sum, r) => sum + r * r, 0);
-          const s2 = rss / (n_reg - k);
-          const varCov = math.multiply(XtX_inv, s2) as any as number[][];
-
-          // ADF test statistic is the t-statistic on y_lag1 (which is beta[1])
-          const beta_y = beta[1] ?? 0;
-          const se_y = Math.sqrt(varCov[1]?.[1] ?? 1e-10);
-          const adfStat = beta_y / se_y;
-
-          // Standard MacKinnon critical values for N ~ 100-500
-          const crit1 = -3.46;
-          const crit5 = -2.88;
-          const crit10 = -2.57;
-
-          
-                    // MacKinnon response-surface p-value, shared with the ARIMA engine.
-          // This replaces a six-value step table that was off by as much as 0.15.
-          const adfPValue = approximateADFPValue(adfStat);
-          
-          
-          
-          
-          
-  
+          // Augmented Dickey-Fuller (ADF) test via the certified estimator
+          // (verified against statsmodels.tsa.stattools.adfuller in reference.test.ts
+          // and directly exercised in recovery.test.ts).
+          const adf = runADFTest(values, lagLength);
 
           setTestResult({
             type: 'stationarity',
             variable: selectedVar,
             n: N,
-            stat: adfStat,
-            pValue: adfPValue,
-            criticalValues: { '1%': crit1, '5%': crit5, '10%': crit10 },
+            stat: adf.adfStat,
+            pValue: adf.pValue,
+            criticalValues: { '1%': adf.criticalValues.pct1, '5%': adf.criticalValues.pct5, '10%': adf.criticalValues.pct10 },
             nullHypothesis: "The variable has a unit root (is non-stationary).",
             altHypothesis: "The variable is stationary (has no unit root).",
-            decision: adfStat < crit5 ? "Reject Null (Stationary)" : "Fail to Reject Null (Non-Stationary)"
+            decision: adf.isStationary ? "Reject Null (Stationary)" : "Fail to Reject Null (Non-Stationary)"
           });
         }
         else if (testType === 'autocorrelation') {

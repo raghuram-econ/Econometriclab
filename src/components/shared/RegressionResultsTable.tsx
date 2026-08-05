@@ -6,11 +6,10 @@ import {
   RefreshCw, ChevronRight, CheckSquare, Square, ToggleLeft, ToggleRight
 } from 'lucide-react';
 import { runOLS } from '../../lib/econometrics/ols';
-import { runFixedEffects, runRandomEffects } from '../../lib/econometrics/fixed_effects';
+import { runFixedEffects, runRandomEffects, runHausmanTest } from '../../lib/econometrics/fixed_effects';
 import { estimateModel } from '../../lib/econometrics/estimators';
 import { useStore } from '../../store/useStore';
 import { sanitizeMath } from '../../lib/sanitizeMath';
-import jStat from 'jstat';
 
 interface ResultsProps {
   results: any | null;
@@ -356,40 +355,35 @@ export default function RegressionResultsTable({
     }
   };
 
-  // Run Hausman specification test on-the-fly
-  const runHausmanTestOnTheFly = () => {
+  // Run the real Hausman specification test using the shared, tested implementation
+  // from fixed_effects.ts (proper quadratic form over ALL common regressors, not just the first).
+  const runHausmanTestForComparison = () => {
     const feSpec = specs.find(s => s.modelType === 'panel_fe');
     const reSpec = specs.find(s => s.modelType === 'panel_re');
     if (!feSpec || !reSpec) return null;
 
-    const feCoeffs = feSpec.results?.coefficients || [];
-    const reCoeffs = reSpec.results?.coefficients || [];
-    const commonVar = feCoeffs.find((c: any) => c.variable !== 'Intercept' && reCoeffs.some((rc: any) => rc.variable === c.variable));
-    
-    if (!commonVar) return { pValue: 0.5, stat: 0.1, verdict: "No common regressors found for FE vs RE comparison." };
-    
-    const rc = reCoeffs.find((c: any) => c.variable === commonVar.variable);
-    const b_fe = commonVar.estimate;
-    const b_re = rc.estimate;
-    const v_fe = commonVar.stdError ** 2;
-    const v_re = rc.stdError ** 2;
-    
-    const diff = b_fe - b_re;
-    const v_diff = Math.abs(v_fe - v_re);
-    
-    const stat = v_diff > 1e-6 ? (diff * diff) / v_diff : 0.01;
-    const pValue = 1 - jStat.chisquare.cdf(stat, 1);
-    
-    return {
-      varName: commonVar.variable,
-      stat,
-      pValue,
-      feVal: b_fe,
-      reVal: b_re
-    };
+    const feResults = feSpec.results;
+    const reResults = reSpec.results;
+    if (!feResults || !reResults) return null;
+
+    const feCoeffs = feResults.coefficients || [];
+    const reCoeffs = reResults.coefficients || [];
+
+    // Common regressors present in both specs (excluding the Intercept, which FE does not estimate).
+    const commonVars = feCoeffs
+      .map((c: any) => c.variable)
+      .filter((v: string) => v !== 'Intercept' && reCoeffs.some((rc: any) => rc.variable === v));
+
+    if (commonVars.length === 0) {
+      return { hStat: NaN, df: 0, pValue: NaN, recommendation: "No common regressors found for FE vs RE comparison." };
+    }
+
+    // runHausmanTest expects the RE covariance matrix to include the Intercept row/col at index 0
+    // (it slices it out internally), matching the shape produced by runRandomEffects/runOLS(intercept=true).
+    return runHausmanTest(feResults, reResults, commonVars);
   };
 
-  const hausman = runHausmanTestOnTheFly();
+  const hausman = runHausmanTestForComparison();
 
   // Export tables (LaTeX Booktabs & Microsoft Word HTML)
   const escapeLatex = (str: string): string => {
@@ -1076,18 +1070,18 @@ export default function RegressionResultsTable({
               );
             }
 
-            const isSignificant = hausman.pValue < 0.05;
-            const colorClass = isSignificant 
-              ? "border-amber-100 bg-amber-50/50 text-amber-800" 
+            const isSignificant = !isNaN(hausman.pValue) && hausman.pValue < 0.05;
+            const colorClass = isSignificant
+              ? "border-amber-100 bg-amber-50/50 text-amber-800"
               : "border-emerald-100 bg-emerald-50/50 text-emerald-800";
-            
-            const statusIcon = isSignificant 
+
+            const statusIcon = isSignificant
               ? <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
               : <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />;
 
-            const text = isSignificant
-              ? `Hausman p=${hausman.pValue.toFixed(3)} (use FE) — RE is inconsistent because coefficients differ systematically (FE=${hausman.feVal.toFixed(3)}, RE=${hausman.reVal.toFixed(3)}).`
-              : `Hausman p=${hausman.pValue.toFixed(2)} (RE holds) — RE is consistent and efficient; individual effects are orthogonal to regressors.`;
+            const text = !isNaN(hausman.pValue)
+              ? `Hausman χ²(${hausman.df})=${hausman.hStat.toFixed(3)}, p=${hausman.pValue.toFixed(3)} — ${hausman.recommendation}`
+              : hausman.recommendation;
 
             return (
               <div className={`border rounded-2xl p-4 flex gap-3 items-start shadow-xs transition-all ${colorClass}`}>

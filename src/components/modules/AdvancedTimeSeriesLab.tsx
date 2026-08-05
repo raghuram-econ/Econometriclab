@@ -14,14 +14,59 @@ import {
 import { Dataset } from '../../types';
 import { generateMasterDataset } from '../../lib/dataGenerators';
 import { runJohansen, runCointegration, runGARCHPy } from '../../services/apiClient';
-import { runGARCH, runGrangerCausality } from '../../lib/econometrics/arima';
+import { runGARCH, runGrangerCausality, runVAR } from '../../lib/econometrics/arima';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
 import { ResponsiveContainer, LineChart as RecLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import * as math from 'mathjs';
 
 interface AdvancedTimeSeriesLabProps {
   dataset: Dataset | null;
   onRunComplete?: (results: any, spec: string) => void;
+}
+
+/**
+ * Lower-triangular Cholesky factor L such that L * L^T = sigma.
+ * Used to orthogonalize VAR residuals for structural IRF identification
+ * (Cholesky ordering: the first variable is assumed not to respond
+ * contemporaneously to shocks in later variables).
+ */
+function choleskyLower(sigma: number[][]): number[][] {
+  const k = sigma.length;
+  const L: number[][] = Array.from({ length: k }, () => new Array(k).fill(0));
+  for (let i = 0; i < k; i++) {
+    for (let j = 0; j <= i; j++) {
+      let sum = 0;
+      for (let m = 0; m < j; m++) {
+        sum += (L[i]?.[m] ?? 0) * (L[j]?.[m] ?? 0);
+      }
+      if (i === j) {
+        const diag = (sigma[i]?.[i] ?? 0) - sum;
+        const row = L[i];
+        if (row) row[j] = Math.sqrt(Math.max(diag, 1e-12));
+      } else {
+        const ljj = L[j]?.[j] ?? 0;
+        const row = L[i];
+        if (row) row[j] = ljj > 1e-12 ? ((sigma[i]?.[j] ?? 0) - sum) / ljj : 0;
+      }
+    }
+  }
+  return L;
+}
+
+/** Plain k x k (or k x m) matrix multiplication. */
+function matMul(A: number[][], B: number[][]): number[][] {
+  const n = A.length;
+  const p = B.length;
+  const m = B[0]?.length ?? 0;
+  const out: number[][] = Array.from({ length: n }, () => new Array(m).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < m; j++) {
+      let s = 0;
+      for (let l = 0; l < p; l++) s += (A[i]?.[l] ?? 0) * (B[l]?.[j] ?? 0);
+      const row = out[i];
+      if (row) row[j] = s;
+    }
+  }
+  return out;
 }
 
 export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunComplete }: AdvancedTimeSeriesLabProps) {
@@ -206,84 +251,62 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
         const series2 = d2.slice(0, len);
 
         if (modelType === 'var') {
-          // Fit VAR(1): 
-          // Y1_t = c1 + a11 * Y1_{t-1} + a12 * Y2_{t-1} + e1
-          // Y2_t = c2 + a21 * Y1_{t-1} + a22 * Y2_{t-1} + e2
-          const Y1: number[] = [];
-          const Y2: number[] = [];
-          const X: number[][] = [];
+          // Fit VAR(p) using the certified estimator (verified against
+          // statsmodels.tsa.api.VAR(...).fit(lags, trend='c') in reference.test.ts).
+          const vars = [varY1, varY2];
+          const k = vars.length;
+          const varData = series1.map((v, idx) => ({ [varY1]: v, [varY2]: series2[idx] ?? 0 }));
+          const varRes = runVAR(varData, vars, lagOrder);
 
-          for (let t = 1; t < len; t++) {
-            Y1.push(series1[t] ?? 0);
-            Y2.push(series2[t] ?? 0);
-            X.push([1, series1[t-1] ?? 0, series2[t-1] ?? 0]);
+          // Orthogonalized Impulse Response Functions: Theta_h = Phi_h * P, where
+          // P is the lower-triangular Cholesky factor of the residual covariance
+          // matrix (P P' = Sigma) and Phi_h are the reduced-form MA coefficients
+          // built recursively from the estimated lag matrices. This identifies
+          // structural shocks under a Cholesky ordering of [varY1, varY2] — i.e.
+          // varY1 is assumed not to respond contemporaneously to a varY2 shock.
+          const P = choleskyLower(varRes.residualCovariance);
+
+          // Companion-form coefficient matrices A_1..A_p (k x k); A_l[i][j] is the
+          // coefficient of variable i's equation on lag l of variable j.
+          const A: number[][][] = [];
+          for (let l = 1; l <= lagOrder; l++) {
+            const mat = vars.map(vi => {
+              const eq = varRes.equations[vi];
+              return vars.map(vj => eq?.coefficients[`${vj}_lag${l}`] ?? 0);
+            });
+            A.push(mat);
           }
 
-          const n_reg = Y1.length;
-          const k = 3;
-
-          const Xt = math.transpose(X);
-          const XtX = math.multiply(Xt, X);
-          const XtX_inv = math.inv(XtX as any) as number[][];
-
-          const beta1 = math.multiply(XtX_inv, math.multiply(Xt, Y1)) as any as number[];
-          const beta2 = math.multiply(XtX_inv, math.multiply(Xt, Y2)) as any as number[];
-
-          // Calculate standard errors & R-squares
-          const y1_hat = math.multiply(X, beta1) as any as number[];
-          const y2_hat = math.multiply(X, beta2) as any as number[];
-
-          const res1 = Y1.map((v, idx) => v - (y1_hat[idx] ?? 0));
-          const res2 = Y2.map((v, idx) => v - (y2_hat[idx] ?? 0));
-
-          const rss1 = res1.reduce((sum, r) => sum + r * r, 0);
-          const rss2 = res2.reduce((sum, r) => sum + r * r, 0);
-
-          const sd_res1 = Math.sqrt(rss1 / (n_reg - k));
-          const sd_res2 = Math.sqrt(rss2 / (n_reg - k));
-
-          // Run Impulse Response Function (IRF) Projection over 8 horizons
-          // Trace a 1 SD shock to Y1's error term (shock to e1)
-          const irf1_y1: number[] = [sd_res1]; // step 0 response of Y1 to shock 1
-          const irf1_y2: number[] = [0];        // step 0 response of Y2 to shock 1
-
-          // Trace a 1 SD shock to Y2's error term (shock to e2)
-          const irf2_y1: number[] = [0];
-          const irf2_y2: number[] = [sd_res2];
-
-          // Project steps 1 to 8:
-          // y_t = A * y_{t-1}
-          for (let h = 1; h <= 8; h++) {
-            const b1_1 = beta1[1] ?? 0;
-            const b1_2 = beta1[2] ?? 0;
-            const b2_1 = beta2[1] ?? 0;
-            const b2_2 = beta2[2] ?? 0;
-            
-            const prev_irf1_y1 = irf1_y1[h-1] ?? 0;
-            const prev_irf1_y2 = irf1_y2[h-1] ?? 0;
-            const prev_irf2_y1 = irf2_y1[h-1] ?? 0;
-            const prev_irf2_y2 = irf2_y2[h-1] ?? 0;
-
-            // response to Shock 1
-            const y1_next_sh1 = b1_1 * prev_irf1_y1 + b1_2 * prev_irf1_y2;
-            const y2_next_sh1 = b2_1 * prev_irf1_y1 + b2_2 * prev_irf1_y2;
-            irf1_y1.push(y1_next_sh1);
-            irf1_y2.push(y2_next_sh1);
-
-            // response to Shock 2
-            const y1_next_sh2 = b1_1 * prev_irf2_y1 + b1_2 * prev_irf2_y2;
-            const y2_next_sh2 = b2_1 * prev_irf2_y1 + b2_2 * prev_irf2_y2;
-            irf2_y1.push(y1_next_sh2);
-            irf2_y2.push(y2_next_sh2);
+          const horizons = 9; // steps 0..8
+          const identity = Array.from({ length: k }, (_, i) => Array.from({ length: k }, (_, j) => (i === j ? 1 : 0)));
+          const Phi: number[][][] = [identity];
+          for (let h = 1; h < horizons; h++) {
+            const mat = Array.from({ length: k }, () => new Array(k).fill(0));
+            for (let l = 1; l <= Math.min(h, lagOrder); l++) {
+              const Al = A[l - 1];
+              const prevPhi = Phi[h - l];
+              if (!Al || !prevPhi) continue;
+              const term = matMul(Al, prevPhi);
+              for (let i = 0; i < k; i++) {
+                for (let j = 0; j < k; j++) {
+                  const row = mat[i];
+                  if (row) row[j] = (row[j] ?? 0) + (term[i]?.[j] ?? 0);
+                }
+              }
+            }
+            Phi.push(mat);
           }
 
-          const irfData = Array.from({ length: 9 }, (_, step) => ({
-            step,
-            shockY1_respY1: irf1_y1[step] ?? 0,
-            shockY1_respY2: irf1_y2[step] ?? 0,
-            shockY2_respY1: irf2_y1[step] ?? 0,
-            shockY2_respY2: irf2_y2[step] ?? 0,
-          }));
+          const irfData = Phi.map((phi, step) => {
+            const theta = matMul(phi, P);
+            return {
+              step,
+              shockY1_respY1: theta[0]?.[0] ?? 0,
+              shockY1_respY2: theta[1]?.[0] ?? 0,
+              shockY2_respY1: theta[0]?.[1] ?? 0,
+              shockY2_respY2: theta[1]?.[1] ?? 0,
+            };
+          });
 
           // Granger causality in both directions via the certified test
           let granger: any = null;
@@ -298,30 +321,18 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
 
           setResults({
             type: 'var',
-            n: n_reg,
+            n: len - lagOrder,
+            lagOrder,
             granger,
             varY1,
             varY2,
-            equation1: {
-              const: beta1[0] ?? 0,
-              y1_lag1: beta1[1] ?? 0,
-              y2_lag1: beta1[2] ?? 0,
-              se_const: Math.sqrt((XtX_inv[0]?.[0] ?? 0) * (rss1 / (n_reg - k))),
-              se_y1_lag1: Math.sqrt((XtX_inv[1]?.[1] ?? 0) * (rss1 / (n_reg - k))),
-              se_y2_lag1: Math.sqrt((XtX_inv[2]?.[2] ?? 0) * (rss1 / (n_reg - k))),
-            },
-            equation2: {
-              const: beta2[0] ?? 0,
-              y1_lag1: beta2[1] ?? 0,
-              y2_lag1: beta2[2] ?? 0,
-              se_const: Math.sqrt((XtX_inv[0]?.[0] ?? 0) * (rss2 / (n_reg - k))),
-              se_y1_lag1: Math.sqrt((XtX_inv[1]?.[1] ?? 0) * (rss2 / (n_reg - k))),
-              se_y2_lag1: Math.sqrt((XtX_inv[2]?.[2] ?? 0) * (rss2 / (n_reg - k))),
-            },
+            equations: varRes.equations,
+            aic: varRes.aic,
+            bic: varRes.bic,
             irfData
           });
           setActiveTab('results');
-        } 
+        }
         else {
           // ARCH / GARCH(1,1) fitted by maximum likelihood via the certified
           // estimator. (This branch previously used hardcoded placeholder
@@ -486,6 +497,8 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
                           className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2.5 text-xs text-stone-800 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         >
                           <option value={1}>VAR(1)</option>
+                          <option value={2}>VAR(2)</option>
+                          <option value={3}>VAR(3)</option>
                         </select>
                       </div>
                     </>
@@ -562,7 +575,7 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
             <div className="bg-white border border-stone-200 rounded-2xl p-8 shadow-sm space-y-6">
               <div className="flex items-start justify-between gap-4">
                 <h4 className="text-lg font-serif font-bold text-stone-900">
-                  {results.type === 'var' ? 'Estimated VAR(1) Coefficient Matrices' : 'ARCH/GARCH Volatility Estimates'}
+                  {results.type === 'var' ? `Estimated VAR(${results.lagOrder}) Coefficient Matrices` : 'ARCH/GARCH Volatility Estimates'}
                 </h4>
                 <button
                   onClick={() => setActiveTab('estimation')}
@@ -578,43 +591,39 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
               {results.type === 'var' ? (
                 <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {/* Eq 1 */}
-                  <div className="border border-stone-100 rounded-xl p-5 bg-stone-50/50 space-y-4">
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-indigo-600">Equation 1: {results.varY1}</span>
-                    <div className="space-y-2 font-mono text-xs">
-                      <div className="flex justify-between border-b border-stone-100 pb-1.5">
-                        <span>Constant (c)</span>
-                        <span className="font-bold">{results.equation1.const.toFixed(4)} <span className="text-xs text-stone-400">(SE: {results.equation1.se_const.toFixed(4)})</span></span>
+                  {[results.varY1, results.varY2].map((eqVar: string, eqIdx: number) => {
+                    const eq = results.equations?.[eqVar];
+                    if (!eq) return null;
+                    const terms: { label: string; value: number }[] = [
+                      { label: 'Constant (c)', value: eq.coefficients['Intercept'] ?? 0 },
+                    ];
+                    for (let l = 1; l <= results.lagOrder; l++) {
+                      terms.push({ label: `${results.varY1} (t-${l})`, value: eq.coefficients[`${results.varY1}_lag${l}`] ?? 0 });
+                      terms.push({ label: `${results.varY2} (t-${l})`, value: eq.coefficients[`${results.varY2}_lag${l}`] ?? 0 });
+                    }
+                    return (
+                      <div key={eqVar} className="border border-stone-100 rounded-xl p-5 bg-stone-50/50 space-y-4">
+                        <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-indigo-600">Equation {eqIdx + 1}: {eqVar}</span>
+                        <div className="space-y-2 font-mono text-xs">
+                          {terms.map((t, i) => (
+                            <div key={t.label} className={`flex justify-between ${i < terms.length - 1 ? 'border-b border-stone-100 pb-1.5' : 'pb-1.5'}`}>
+                              <span>{t.label}</span>
+                              <span className="font-bold">{t.value.toFixed(4)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between pt-1 text-stone-400">
+                            <span>R&sup2;</span>
+                            <span>{eq.rSquared.toFixed(4)}</span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex justify-between border-b border-stone-100 pb-1.5">
-                        <span>{results.varY1} (t-1)</span>
-                        <span className="font-bold">{results.equation1.y1_lag1.toFixed(4)} <span className="text-xs text-stone-400">(SE: {results.equation1.se_y1_lag1.toFixed(4)})</span></span>
-                      </div>
-                      <div className="flex justify-between pb-1.5">
-                        <span>{results.varY2} (t-1)</span>
-                        <span className="font-bold">{results.equation1.y2_lag1.toFixed(4)} <span className="text-xs text-stone-400">(SE: {results.equation1.se_y2_lag1.toFixed(4)})</span></span>
-                      </div>
-                    </div>
-                  </div>
+                    );
+                  })}
+                </div>
 
-                  {/* Eq 2 */}
-                  <div className="border border-stone-100 rounded-xl p-5 bg-stone-50/50 space-y-4">
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-indigo-600">Equation 2: {results.varY2}</span>
-                    <div className="space-y-2 font-mono text-xs">
-                      <div className="flex justify-between border-b border-stone-100 pb-1.5">
-                        <span>Constant (c)</span>
-                        <span className="font-bold">{results.equation2.const.toFixed(4)} <span className="text-xs text-stone-400">(SE: {results.equation2.se_const.toFixed(4)})</span></span>
-                      </div>
-                      <div className="flex justify-between border-b border-stone-100 pb-1.5">
-                        <span>{results.varY1} (t-1)</span>
-                        <span className="font-bold">{results.equation2.y1_lag1.toFixed(4)} <span className="text-xs text-stone-400">(SE: {results.equation2.se_y1_lag1.toFixed(4)})</span></span>
-                      </div>
-                      <div className="flex justify-between pb-1.5">
-                        <span>{results.varY2} (t-1)</span>
-                        <span className="font-bold">{results.equation2.y2_lag1.toFixed(4)} <span className="text-xs text-stone-400">(SE: {results.equation2.se_y2_lag1.toFixed(4)})</span></span>
-                      </div>
-                    </div>
-                  </div>
+                <div className="flex flex-wrap gap-4 text-[11px] font-mono text-stone-500">
+                  <span>AIC: <span className="font-bold text-stone-700">{results.aic?.toFixed(4)}</span></span>
+                  <span>BIC: <span className="font-bold text-stone-700">{results.bic?.toFixed(4)}</span></span>
                 </div>
 
                 {results.granger && (
@@ -680,7 +689,7 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
               {results.type === 'var' ? (
                 <div className="space-y-8">
                   <p className="text-xs text-stone-600 font-serif leading-relaxed">
-                    The chart below represents the dynamic response of the system to a 1-standard-deviation structural shock. It tracks how a shock in e₁ or e₂ propagates through the feedback lag coefficients over 8 periods.
+                    The chart below shows <span className="font-bold">orthogonalized</span> impulse responses: residual shocks are decorrelated via a Cholesky decomposition of the residual covariance matrix before being propagated through the estimated VAR({results.lagOrder}) lag coefficients over 8 periods. Because the Cholesky ordering is [{results.varY1}, {results.varY2}], {results.varY1} is assumed not to respond contemporaneously (at step 0) to a shock in {results.varY2} — reordering the variables can change these responses.
                   </p>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
