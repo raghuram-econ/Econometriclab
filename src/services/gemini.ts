@@ -511,6 +511,39 @@ export async function recommendModel(
   }
 }
 
+export interface RecommendedPowerDesignResponse {
+  recommendation: 'rct' | 'ols_coef' | 'cluster_did';
+  confidence: 'high' | 'medium' | 'low';
+  reason: string;
+}
+
+export async function recommendPowerDesign(
+  studyDescription: string
+): Promise<RecommendedPowerDesignResponse> {
+  try {
+    const headers = await getAuthHeaders();
+    const response = await fetch("/api/gemini/recommend-power-design", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ studyDescription }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Server returned status ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error?.status !== 429 && !error?.message?.includes('429')) console.error("Recommend Power Design Fetch Error:", error);
+    return {
+      recommendation: "rct",
+      confidence: "low",
+      reason: `Default fallback recommendation due to API latency or connectivity issues: ${error.message || "API Connection error."} Please review the three design cards below and pick manually.`,
+    };
+  }
+}
+
 export async function generateMetaAnalysis(
   history: any[],
   researchQuestion: any,

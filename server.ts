@@ -1667,6 +1667,68 @@ CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical valu
     }
   });
 
+  app.post("/api/gemini/recommend-power-design", async (req, res) => {
+    try {
+      const { studyDescription } = req.body;
+      const ai = getGeminiClient();
+
+      const prompt = `
+        You are a Senior Econometrician advising on statistical power analysis study design.
+        A researcher has briefly described their study. Recommend which power-analysis
+        design module they should use.
+
+        STUDY DESCRIPTION:
+        ${studyDescription || 'No description provided.'}
+
+        THE THREE AVAILABLE MODULES:
+        - 'rct': RCT / Policy Evaluation -- comparing treatment vs. control groups, individually
+          randomized, two-sample comparison of means (Cohen's d effect size).
+        - 'ols_coef': Regression Coefficient -- estimating power to detect a continuous OLS slope
+          coefficient in an observational regression, accounting for noise and multicollinearity (VIF).
+        - 'cluster_did': Clustered Design / DiD -- treatment assigned at a group/cluster level
+          (villages, schools, clinics, firms), requiring intraclass correlation (ICC) / design-effect
+          adjustments, or a difference-in-differences rollout.
+
+        RECOMMEND EXACTLY ONE OF: 'rct', 'ols_coef', 'cluster_did'.
+
+        OUTPUT FORMAT (JSON):
+        {
+          "recommendation": "One of: rct, ols_coef, cluster_did",
+          "confidence": "One of: high, medium, low",
+          "reason": "Concise explanation (2-3 sentences) of why this design module fits the described study."
+        }
+      `;
+
+      const result = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              recommendation: {
+                type: Type.STRING,
+                enum: ['rct', 'ols_coef', 'cluster_did']
+              },
+              confidence: {
+                type: Type.STRING,
+                enum: ['high', 'medium', 'low']
+              },
+              reason: { type: Type.STRING }
+            },
+            required: ['recommendation', 'confidence', 'reason']
+          }
+        }
+      });
+
+      res.json(JSON.parse((result.text || '').trim()));
+    } catch (error: any) {
+      if (error?.status !== 429 && !error?.message?.includes('429')) console.error("Recommend Power Design Error:", error);
+      res.status(500).json({ error: error.message || "Failed to generate power design recommendation" });
+    }
+  });
+
   app.post("/api/gemini/generate-meta-analysis", async (req, res) => {
     try {
       const { history, researchQuestion, dataset } = req.body;

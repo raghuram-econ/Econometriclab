@@ -13,7 +13,9 @@ import {
   BookOpen,
   LineChart as LineChartIcon,
   CheckCircle2,
-  GitPullRequest
+  GitPullRequest,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 import jStat from 'jstat';
 import { 
@@ -30,6 +32,7 @@ import {
 import { cn } from '../../lib/utils';
 import { Dataset } from '../../types';
 import { runPower } from '../../services/apiClient';
+import { recommendPowerDesign, RecommendedPowerDesignResponse } from '../../services/gemini';
 
 interface PowerAnalysisLabProps {
   dataset: Dataset | null;
@@ -86,6 +89,30 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
   const [clusterExactResult, setClusterExactResult] = useState<{ achievedPower: number; requiredN: number; mde: number; designEffect: number; requiredClusters: number } | null>(null);
   const [clusterExactLoading, setClusterExactLoading] = useState<boolean>(false);
   const [clusterExactError, setClusterExactError] = useState<string | null>(null);
+
+  // AI-assisted "Recommended Design" advisor
+  const [studyDescription, setStudyDescription] = useState<string>('');
+  const [designRecommendation, setDesignRecommendation] = useState<RecommendedPowerDesignResponse | null>(null);
+  const [designRecLoading, setDesignRecLoading] = useState<boolean>(false);
+  const [designRecIsFallback, setDesignRecIsFallback] = useState<boolean>(false);
+
+  const handleGetDesignRecommendation = async () => {
+    if (!studyDescription.trim()) return;
+    setDesignRecLoading(true);
+    setDesignRecommendation(null);
+    setDesignRecIsFallback(false);
+    try {
+      const rec = await recommendPowerDesign(studyDescription.trim());
+      setDesignRecommendation(rec);
+      // recommendPowerDesign() swallows network/API failures and returns an honest
+      // labeled fallback instead of throwing -- detect that fallback here (its
+      // reason string always mentions the connectivity issue) so the UI can be
+      // transparent about which case occurred, matching recommendModel()'s convention.
+      setDesignRecIsFallback(/API latency or connectivity issues/i.test(rec.reason));
+    } finally {
+      setDesignRecLoading(false);
+    }
+  };
 
   // Auto-populate from active dataset if available
   const handleAutoPopulate = () => {
@@ -448,6 +475,71 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
         </div>
       </div>
 
+      {/* Recommended Design Advisor */}
+      <div className="card-premium p-6 bg-white border-slate-100 shadow-sm space-y-4">
+        <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+          <Sparkles className="w-4 h-4 text-indigo-500" />
+          <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-900 font-mono">Recommended Design</h4>
+          <span className="text-[9px] text-slate-400 font-serif italic ml-auto">Optional -- describe your study and get an AI-assisted starting point</span>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input
+            type="text"
+            value={studyDescription}
+            onChange={(e) => setStudyDescription(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !designRecLoading) handleGetDesignRecommendation(); }}
+            placeholder="Briefly describe your study design (e.g. &quot;randomizing a cash transfer to households&quot; or &quot;policy rolled out by district&quot;)..."
+            className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400"
+          />
+          <button
+            onClick={handleGetDesignRecommendation}
+            disabled={designRecLoading || !studyDescription.trim()}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[10px] font-bold font-mono uppercase tracking-wider transition disabled:opacity-50 whitespace-nowrap"
+          >
+            {designRecLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            {designRecLoading ? 'Analyzing…' : 'Get Recommendation'}
+          </button>
+        </div>
+
+        {designRecommendation && (
+          <div className={cn(
+            "rounded-lg p-3.5 border text-[11px] leading-relaxed font-serif",
+            designRecIsFallback
+              ? "bg-amber-50 border-amber-200 text-amber-900"
+              : "bg-indigo-50 border-indigo-100 text-indigo-950"
+          )}>
+            <div className="flex items-center gap-2 mb-1.5 font-sans">
+              {designRecIsFallback ? (
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              )}
+              <span className="text-[9px] font-black uppercase tracking-wider">
+                {designRecIsFallback ? 'Fallback (AI call failed) — ' : 'AI Recommendation — '}
+                {designRecommendation.recommendation === 'rct' ? 'RCT / Policy Evaluation' : designRecommendation.recommendation === 'ols_coef' ? 'Regression Coefficient' : 'Clustered Design / DiD'}
+              </span>
+              <span className={cn(
+                "px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider font-sans",
+                designRecommendation.confidence === 'high' ? "bg-emerald-200 text-emerald-800" :
+                designRecommendation.confidence === 'medium' ? "bg-amber-200 text-amber-800" :
+                "bg-slate-200 text-slate-700"
+              )}>
+                {designRecommendation.confidence} confidence
+              </span>
+            </div>
+            <p className="italic">{designRecommendation.reason}</p>
+            {designRecommendation.recommendation !== mode && (
+              <button
+                onClick={() => setMode(designRecommendation.recommendation)}
+                className="mt-2 text-[9px] font-bold font-mono uppercase tracking-wider text-indigo-700 hover:underline"
+              >
+                Switch to this design &rarr;
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Mode Selectors */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[
@@ -477,16 +569,22 @@ export default function PowerAnalysisLab({ dataset }: PowerAnalysisLabProps) {
             key={m.id}
             onClick={() => setMode(m.id as any)}
             className={cn(
-              "card-premium p-6 text-left transition-all hover:shadow-md border flex flex-col justify-between h-full group",
-              mode === m.id 
-                ? "bg-slate-950 border-slate-950 text-white shadow-xl" 
-                : "bg-white text-slate-800 border-slate-100"
+              "card-premium p-6 text-left transition-all hover:shadow-md border flex flex-col justify-between h-full group relative",
+              mode === m.id
+                ? "bg-slate-950 border-slate-950 text-white shadow-xl"
+                : "bg-white text-slate-800 border-slate-100",
+              designRecommendation?.recommendation === m.id && mode !== m.id && "ring-2 ring-indigo-400 ring-offset-2"
             )}
           >
+            {designRecommendation?.recommendation === m.id && (
+              <span className="absolute -top-2.5 right-4 flex items-center gap-1 px-2 py-0.5 bg-indigo-600 text-white text-[8px] font-black uppercase tracking-wider rounded-full shadow-sm">
+                <Sparkles className="w-2.5 h-2.5" /> Recommended
+              </span>
+            )}
             <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <div className={cn(
-                  "p-2.5 rounded-xl", 
+                  "p-2.5 rounded-xl",
                   mode === m.id ? "bg-slate-800 text-white" : "bg-slate-50 text-slate-600"
                 )}>
                   <m.icon className="w-5 h-5" />
