@@ -71,7 +71,8 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [rdResult, setRdResult] = useState<any | null>(null);
   const [researchGradeRd, setResearchGradeRd] = useState(false);
 
-  // Dynamic Panel GMM State (Arellano-Bond, Python backend)
+  // Dynamic Panel GMM State (Arellano-Bond / Blundell-Bond, Python backend)
+  const [gmmType, setGmmType] = useState<'difference' | 'system'>('difference');
   const [gmmEntity, setGmmEntity] = useState('');
   const [gmmTime, setGmmTime] = useState('');
   const [gmmDep, setGmmDep] = useState('');
@@ -471,12 +472,24 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
         depVar: '2',
         instruments: gmmInstruments.map((_, i) => String(3 + i)),
         columnNames: cols,
+        gmmType,
       });
-      setGmmResult({ ...res, gmmDep, gmmEntity, gmmTime });
+      setGmmResult({ ...res, gmmDep, gmmEntity, gmmTime, gmmType });
+      const specLabel = gmmType === 'system'
+        ? `Dynamic Panel System GMM (Blundell-Bond): ${gmmDep} on L1.${gmmDep}` + (gmmInstruments.length ? ` + ${gmmInstruments.join(' + ')}` : '')
+        : `Dynamic Panel GMM (Arellano-Bond): d.${gmmDep} on d.L1.${gmmDep}` + (gmmInstruments.length ? ` + ${gmmInstruments.join(' + ')}` : '');
       onRunComplete({
         type: 'generic',
-        specification: `Dynamic Panel GMM (Arellano-Bond): d.${gmmDep} on d.L1.${gmmDep}` + (gmmInstruments.length ? ` + ${gmmInstruments.join(' + ')}` : ''),
-        results: res
+        specification: specLabel,
+        results: {
+          ...res,
+          causalType: 'gmm',
+          gmmType,
+          gmmDep,
+          gmmEntity,
+          gmmTime,
+          gmmInstruments,
+        }
       });
     } catch (err: any) {
       setEstimationError(`Estimation error: ${err.message || err}`);
@@ -1380,8 +1393,26 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
               <GitCommit className="w-4 h-4 text-stone-600" />
               Dynamic Panel GMM
             </h3>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => { setGmmType('difference'); setGmmResult(null); }}
+                className={cn("p-2 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition",
+                  gmmType === 'difference' ? 'border-[#1B2E41] bg-[#1B2E41]/5 text-[#1B2E41]' : 'border-stone-200 text-stone-500')}
+              >
+                Difference (Arellano-Bond)
+              </button>
+              <button
+                onClick={() => { setGmmType('system'); setGmmResult(null); }}
+                className={cn("p-2 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition",
+                  gmmType === 'system' ? 'border-[#1B2E41] bg-[#1B2E41]/5 text-[#1B2E41]' : 'border-stone-200 text-stone-500')}
+              >
+                System (Blundell-Bond)
+              </button>
+            </div>
             <p className="text-[10px] text-stone-400 leading-relaxed">
-              Arellano-Bond: the model is first-differenced and the lagged dependent variable is instrumented with deeper lags. Entity and Time must be numeric columns. Runs on the Python (linearmodels) engine.
+              {gmmType === 'system'
+                ? 'Blundell-Bond: adds level-equation moment conditions (the lagged dependent variable in levels instrumented by its own lagged first-difference) to the Arellano-Bond difference equations, improving efficiency when the autoregressive coefficient is close to 1. Entity and Time must be numeric columns. Runs on the Python (pydynpd) engine -- matches Stata\'s xtabond2 conventions.'
+                : 'Arellano-Bond: the model is first-differenced and the lagged dependent variable is instrumented with deeper lags. Entity and Time must be numeric columns. Runs on the Python (linearmodels) engine.'}
             </p>
             <div className="space-y-3">
               <div>
@@ -1441,15 +1472,21 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
               <div className="p-12 text-center bg-stone-50 border border-stone-200 rounded-2xl h-full flex flex-col justify-center items-center">
                 <GitCommit className="w-10 h-10 text-stone-300 mb-2" />
                 <h4 className="text-sm font-bold text-stone-600">No GMM Model Run</h4>
-                <p className="text-xs text-stone-400 font-serif italic max-w-sm mt-1">Select entity, time, and a dependent variable to fit an Arellano-Bond dynamic panel model.</p>
+                <p className="text-xs text-stone-400 font-serif italic max-w-sm mt-1">Select entity, time, and a dependent variable to fit a {gmmType === 'system' ? 'Blundell-Bond system' : 'Arellano-Bond difference'} dynamic panel model.</p>
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className={cn("grid gap-4", gmmResult.gmmType === 'system' ? "grid-cols-2 md:grid-cols-5" : "grid-cols-2 md:grid-cols-3")}>
                   <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
                     <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Observations</span>
                     <span className="text-xl font-serif font-bold text-stone-800">{gmmResult.n_obs ?? '—'}</span>
                   </div>
+                  {gmmResult.gmmType === 'system' && (
+                    <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Groups / Instruments</span>
+                      <span className="text-xl font-serif font-bold text-stone-800">{gmmResult.n_groups ?? '—'} / {gmmResult.n_instruments ?? '—'}</span>
+                    </div>
+                  )}
                   <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
                     <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Hansen J</span>
                     <span className="text-xl font-serif font-bold text-stone-800">{typeof gmmResult.j_stat === 'number' ? fmt(gmmResult.j_stat) : '—'}</span>
@@ -1458,6 +1495,12 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                     <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">J p-value</span>
                     <span className="text-xl font-serif font-bold text-stone-800">{typeof gmmResult.j_pval === 'number' ? fmtP(gmmResult.j_pval) : '—'}</span>
                   </div>
+                  {gmmResult.gmmType === 'system' && Array.isArray(gmmResult.arTests) && gmmResult.arTests.map((ar: any) => (
+                    <div key={ar.lag} className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">AR({ar.lag}) p-value</span>
+                      <span className="text-xl font-serif font-bold text-stone-800">{typeof ar.pValue === 'number' ? fmtP(ar.pValue) : '—'}</span>
+                    </div>
+                  ))}
                 </div>
                 {gmmResult.j_note && (
                   <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl flex items-start gap-2.5 text-stone-600">
@@ -1466,7 +1509,9 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                   </div>
                 )}
                 <div className="bg-white border border-stone-200 rounded-2xl p-6">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4">Dynamic GMM Coefficient Matrix</h3>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4">
+                    {gmmResult.gmmType === 'system' ? 'System GMM Coefficient Matrix' : 'Dynamic GMM Coefficient Matrix'}
+                  </h3>
                   <div className="overflow-x-auto">
                     <table className="journal-table">
                       <thead><tr><th>Variable</th><th>Estimate</th><th>Std Error</th><th>t-stat</th><th>p-value</th><th>Significance</th></tr></thead>

@@ -10,6 +10,7 @@ arch>=6.3.0
 rdrobust>=1.3.0
 pysyncon>=1.4.0
 csdid>=0.4.2
+pydynpd>=0.2.2
 pydantic>=2.6.0
 python-multipart>=0.0.9
 pyreadstat>=1.2.0

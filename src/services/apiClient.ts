@@ -135,6 +135,8 @@ export async function runGMM(payload: {
   depVar: string;
   instruments: string[];
   columnNames?: string[];
+  // 'difference' (Arellano-Bond 1991, default) or 'system' (Blundell-Bond 1998).
+  gmmType?: 'difference' | 'system';
 }): Promise<any> {
   return callBackendAPI('/api/python/gmm', payload);
 }

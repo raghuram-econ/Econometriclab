@@ -108,6 +108,12 @@ export const ReplicationCodeTab: React.FC<ReplicationCodeTabProps> = ({ activeRu
           options.rdCutoff = item.results.rdCutoff ?? 0;
           options.rdBandwidth = item.results.rdBandwidth ?? 1;
           options.rdPolynomial = item.results.rdPolynomial || 'linear';
+        } else if (item.results.causalType === 'gmm') {
+          yVar = item.results.gmmDep || 'y';
+          xVars = item.results.gmmInstruments || [];
+          options.gmmType = item.results.gmmType === 'system' ? 'system' : 'difference';
+          options.gmmEntity = item.results.gmmEntity || 'id';
+          options.gmmTime = item.results.gmmTime || 'year';
         }
       }
     } else if (moduleLower === 'limited') {
@@ -285,6 +291,36 @@ gen int_term = treated * r_centered
 * To install: ssc install rdrobust, replace
 rdrobust ${yVar} ${running}, c(${cutoff}) h(${bandwidth})
 `;
+      } else if (causalType === 'gmm') {
+        const entity = options.gmmEntity || 'id';
+        const time = options.gmmTime || 'year';
+        const controls = xVars.join(' ');
+        const isSystem = options.gmmType === 'system';
+
+        code += `* 2. Dynamic Panel GMM for ${yVar}
+* Entity: ${entity}, Time: ${time}
+* Exogenous controls: ${controls || 'None'}
+
+xtset ${entity} ${time}
+
+`;
+        if (isSystem) {
+          code += `* Blundell-Bond (1998) System GMM
+* Instruments the differenced lagged DV with its own lagged levels (Arellano-Bond
+* moment conditions) AND instruments the level-equation lagged DV with its own
+* lagged first-difference (the Blundell-Bond/Arellano-Bover addition), so both
+* the differenced and level equations are estimated jointly ("system").
+xtabond2 ${yVar} L.${yVar} ${controls}, gmm(L.${yVar}, lag(2 .)) iv(${controls}) robust small
+`;
+        } else {
+          code += `* Arellano-Bond (1991) Difference GMM
+* First-differences the model to sweep out fixed effects, then instruments
+* the differenced lagged DV with its own second-and-deeper lags in levels.
+xtabond2 ${yVar} L.${yVar} ${controls}, gmm(L.${yVar}, lag(2 .)) iv(${controls}) nolevel robust small
+* Equivalently, using Stata's older, narrower xtabond command:
+* xtabond ${yVar} ${controls}, lags(1) robust
+`;
+        }
       }
     } else if (modelType === 'limited') {
       const type = options.limitedType || 'logit';
@@ -337,6 +373,8 @@ required_packages <- c("sandwich", "lmtest", "ggplot2", "dplyr"`;
         code += `, "AER", "fixest"`;
       } else if (causalType === 'rd') {
         code += `, "rdrobust"`;
+      } else if (causalType === 'gmm') {
+        code += `, "plm"`;
       }
     } else if (modelType === 'limited') {
       code += `, "AER", "MASS", "mfx"`;
@@ -533,6 +571,38 @@ library(rdrobust)
 rd_nonparam <- rdrobust(y = df$${yVar}, x = df$${running}, c = ${cutoff}, h = ${bandwidth})
 summary(rd_nonparam)
 `;
+      } else if (causalType === 'gmm') {
+        const entity = options.gmmEntity || 'id';
+        const time = options.gmmTime || 'year';
+        const controls = xVars.length ? ' + ' + xVars.join(' + ') : '';
+        const isSystem = options.gmmType === 'system';
+
+        code += `# 3. Dynamic Panel GMM (plm::pgmm)
+# Entity: ${entity}, Time: ${time}
+library(plm)
+pdata <- pdata.frame(df, index = c("${entity}", "${time}"))
+
+`;
+        if (isSystem) {
+          code += `# Blundell-Bond (1998) System GMM: transformation = "ld" (levels AND
+# differences) estimates the stacked difference + level equations jointly,
+# instrumenting the differenced lagged DV with its own lagged levels and the
+# level-equation lagged DV with its own lagged first-difference.
+gmm_system <- pgmm(${yVar} ~ lag(${yVar}, 1)${controls} | lag(${yVar}, 2:99),
+                    data = pdata, effect = "twoways", model = "onestep",
+                    transformation = "ld")
+summary(gmm_system, robust = TRUE)
+`;
+        } else {
+          code += `# Arellano-Bond (1991) Difference GMM: transformation = "d" (the plm
+# default) first-differences the model and instruments the differenced
+# lagged DV with its own second-and-deeper lags in levels.
+gmm_diff <- pgmm(${yVar} ~ lag(${yVar}, 1)${controls} | lag(${yVar}, 2:99),
+                  data = pdata, effect = "twoways", model = "onestep",
+                  transformation = "d")
+summary(gmm_diff, robust = TRUE)
+`;
+        }
       }
     } else if (modelType === 'limited') {
       const type = options.limitedType || 'logit';

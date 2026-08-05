@@ -660,9 +660,183 @@ class GMMRequest(BaseModel):
     # positional indices, not names -- this lets coefficient labels show the
     # real variable instead of its raw index).
     columnNames: Optional[List[str]] = None
+    # 'difference' (Arellano-Bond 1991, the original hand-built IVGMM path
+    # below) or 'system' (Blundell-Bond 1998, routed to _run_system_gmm via
+    # the pydynpd package). Defaults to 'difference' to preserve old callers.
+    gmmType: Optional[str] = 'difference'
+
+
+# ── System GMM (Blundell-Bond, 1998) via pydynpd ────────────────────
+#
+# pydynpd (https://pypi.org/project/pydynpd/) is a dedicated dynamic-panel-GMM
+# package that mirrors Stata's xtabond2 (the standard tool economists use for
+# this estimator): it builds the stacked difference+level moment conditions,
+# the two-equation instrument matrix, the GMM weighting matrix, and the
+# Windmeijer (2005) finite-sample SE correction. We call into it rather than
+# hand-rolling System GMM's moment conditions ourselves -- see
+# backend/tests/test_gmm_system.py for the independent verification of this
+# package's output against a published reference table.
+#
+# pydynpd 0.2.2 (the latest release on PyPI as of writing) has two small
+# incompatibilities with numpy>=2.0 (float() on a size-1, non-0-d ndarray,
+# used in its own Hansen/AR test-statistic code, which numpy>=2.0 rejects
+# where numpy<2.0 allowed it). These shims only patch the module-level
+# `float`/`math` names *inside pydynpd's own specification_tests module* --
+# they do not touch numpy globally or change any estimation math.
+_pydynpd_patched = False
+
+def _ensure_pydynpd_numpy_compat():
+    global _pydynpd_patched
+    if _pydynpd_patched:
+        return
+    import numpy as np
+    if not hasattr(np, 'in1d'):
+        np.in1d = np.isin  # np.in1d was removed in favor of np.isin
+
+    import types
+    import math as _real_math
+    import pydynpd.specification_tests as _pd_tests
+
+    _builtin_float = float
+    def _safe_float(x):
+        if isinstance(x, np.ndarray):
+            return _builtin_float(np.asarray(x).reshape(-1)[0])
+        return _builtin_float(x)
+    _pd_tests.float = _safe_float
+
+    def _safe_sqrt(x):
+        if isinstance(x, np.ndarray):
+            return np.sqrt(x).reshape(-1)[0]
+        return _real_math.sqrt(x)
+    _pd_tests.math = types.SimpleNamespace(sqrt=_safe_sqrt)
+
+    _pydynpd_patched = True
+
+
+def _run_system_gmm(req: "GMMRequest"):
+    """Blundell-Bond (1998) one-step system GMM for a simple AR(1) dynamic
+    panel: dep_it = alpha * dep_i,t-1 + beta'x_it + fixed effect + error, with
+    the lagged dependent variable instrumented in the difference equation by
+    its own lags (2 and deeper, levels) and in the level equation by its own
+    lagged difference, per Blundell-Bond/Arellano-Bover. Additional regressors
+    (`instruments`) are treated as strictly exogenous and enter as their own
+    instrument in both equations -- the same role they play in the existing
+    difference-GMM path above.
+    """
+    import pandas as pd
+    import numpy as np
+
+    _ensure_pydynpd_numpy_compat()
+    from pydynpd import regression
+    import pydynpd.specification_tests  # noqa: F401 (ensures patch target imported)
+
+    if len(req.data) > 0 and isinstance(req.data[0], list):
+        df = pd.DataFrame(req.data)
+        dep_col = int(req.depVar)
+        instr_cols = [int(i) for i in req.instruments]
+        ent_col = int(req.entityVar) if req.entityVar else None
+        time_col = int(req.timeVar) if req.timeVar else None
+    else:
+        df = pd.DataFrame(req.data)
+        dep_col = req.depVar
+        instr_cols = list(req.instruments)
+        ent_col = req.entityVar
+        time_col = req.timeVar
+
+    if ent_col is None or time_col is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Entity and Time variables are required for System GMM."
+        )
+
+    if len(df) < (len(instr_cols) + 8):
+        raise HTTPException(
+            status_code=422,
+            detail="Insufficient data points for System GMM. Ensure you have at least 4 periods per panel entity."
+        )
+
+    def _display(col):
+        if req.columnNames and isinstance(col, int) and 0 <= col < len(req.columnNames):
+            return req.columnNames[col]
+        return str(col)
+
+    # pydynpd's command-string DSL only accepts valid-identifier column names
+    # (must start with a letter/underscore) -- raw positional indices like "2"
+    # don't parse. Rename everything to safe internal names, run pydynpd
+    # against those, then map the result rows back to the real display names
+    # via `_display` (the same index-vs-name split the difference-GMM path
+    # above already uses, so raw column indices never leak into a label).
+    safe_dep = "dep0"
+    safe_instr = [f"x{i}" for i in range(len(instr_cols))]
+    safe_ent, safe_time = "_ent", "_time"
+
+    rename_map = {ent_col: safe_ent, time_col: safe_time, dep_col: safe_dep}
+    for orig, safe in zip(instr_cols, safe_instr):
+        rename_map[orig] = safe
+
+    cols_needed = [ent_col, time_col, dep_col] + instr_cols
+    work_df = df[cols_needed].rename(columns=rename_map).apply(pd.to_numeric, errors='coerce')
+
+    part1 = f"{safe_dep} L1.{safe_dep}" + ("".join(f" {c}" for c in safe_instr))
+    part2 = f"gmm({safe_dep}, 2:.)"
+    part3 = "onestep"
+    command_str = f"{part1} | {part2} | {part3}"
+
+    try:
+        mydpd = regression.abond(command_str, work_df, [safe_ent, safe_time])
+    except SystemExit as e:
+        # Several internal validation paths in pydynpd call sys.exit() instead
+        # of raising -- must intercept so a malformed request can't kill the
+        # API worker process.
+        raise HTTPException(status_code=422, detail=f"System GMM estimation failed: {e}")
+
+    if not mydpd.models:
+        raise HTTPException(status_code=422, detail="System GMM estimation did not converge to a model.")
+
+    model = mydpd.models[0]
+
+    name_map = {f"L1.{safe_dep}": f"Lagged Dependent Variable L1.({_display(dep_col)})", "_con": "Constant"}
+    for orig, safe in zip(instr_cols, safe_instr):
+        name_map[safe] = _display(orig)
+
+    reg_table = model.regression_table
+    coef_rows = []
+    for i in range(len(reg_table)):
+        raw_name = reg_table['variable'][i]
+        display_name = name_map.get(raw_name, raw_name)
+        coef_rows.append(build_coef_row(
+            display_name,
+            reg_table['coefficient'][i], reg_table['std_err'][i],
+            reg_table['z_value'][i], reg_table['p_value'][i],
+        ))
+
+    ar_tests = [
+        {"lag": int(ar.lag), "stat": safe_float(ar.AR), "pValue": safe_float(ar.P_value)}
+        for ar in model.AR_list
+    ]
+
+    return {
+        "coefficients": coef_rows,
+        "n_obs": int(model.num_obs),
+        "n_groups": int(model.N),
+        "n_instruments": int(model.z_information.num_instr),
+        "j_stat": safe_float(model.hansen.test_value),
+        "j_pval": safe_float(model.hansen.p_value),
+        "j_note": f"Hansen test of overidentifying restrictions, {model.hansen.df} degrees of freedom.",
+        "arTests": ar_tests,
+        "gmmType": "system",
+    }
+
 
 @app.post("/python/gmm")
 def run_gmm(req: GMMRequest):
+    if (req.gmmType or 'difference').lower() == 'system':
+        try:
+            return _run_system_gmm(req)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=str(e))
     try:
         from linearmodels.iv import IVGMM
         import pandas as pd
