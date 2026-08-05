@@ -75,7 +75,33 @@ export function subscribeToAuth(callback: (user: User | null) => void) {
     const timer = setTimeout(() => callback(null), 0);
     return () => clearTimeout(timer);
   }
-  return onAuthStateChanged(auth, callback);
+
+  // onAuthStateChanged's first callback can hang indefinitely if Firebase's
+  // persistence-layer check (IndexedDB) never resolves -- the same class of
+  // issue signInAnonymously has, but with no existing fallback at all, so
+  // the app's `isHydrated` flag would never flip and even a successful
+  // guest-mode sign-in downstream could never render past the auth gate.
+  // Force a "signed out" callback after a timeout if Firebase hasn't
+  // reported anything yet; if the real callback fires later, let it through
+  // too (harmless -- it just updates state again).
+  let fired = false;
+  const timer = setTimeout(() => {
+    if (!fired) {
+      fired = true;
+      callback(null);
+    }
+  }, 6000);
+
+  const unsubscribe = onAuthStateChanged(auth, (user) => {
+    fired = true;
+    clearTimeout(timer);
+    callback(user);
+  });
+
+  return () => {
+    clearTimeout(timer);
+    unsubscribe();
+  };
 }
 
 export async function signOut() {
