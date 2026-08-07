@@ -352,7 +352,7 @@ async function startServer() {
         "X-Title": "Econometrics Lab",
       },
       body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat",
+        model: process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4-pro",
         messages,
         temperature: config.temperature ?? 0.3,
         ...(wantsJson ? { response_format: { type: "json_object" } } : {}),
