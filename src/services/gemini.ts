@@ -322,9 +322,97 @@ function getLocalStatsInterpretation(
 }
 
 
+export interface WorkspaceRunSummary {
+  module: string;
+  specification: string;
+  timestamp: string;
+  n?: number;
+  rSquared?: number;
+  adjRSquared?: number;
+  isRobust?: boolean;
+  breuschPaganPValue?: number;
+  jarqueBeraPValue?: number;
+  durbinWatson?: number;
+  maxVif?: number;
+}
+
+export interface WorkspaceDatasetSummary {
+  name: string;
+  structure: string;
+  rowCount: number;
+  colCount: number;
+  variables: string[];
+}
+
+export interface WorkspaceContext {
+  dataset: WorkspaceDatasetSummary | null;
+  runs: WorkspaceRunSummary[];
+}
+
+function getLocalLabPartnerAnswer(question: string, context: WorkspaceContext): string {
+  const { dataset, runs } = context;
+
+  if (runs.length === 0) {
+    return `I don't see any analyses in your history yet${dataset ? ` for "${dataset.name}"` : ''}. Run a model (e.g. OLS or Fixed Effects) and I'll be able to summarize and review the results.`;
+  }
+
+  const lines: string[] = [];
+  lines.push(`### Lab Partner Summary\n`);
+  lines.push(`You have **${runs.length}** analysis run(s)${dataset ? ` on **${dataset.name}** (${dataset.rowCount} rows, ${dataset.colCount} variables)` : ''}.\n`);
+
+  const flagged: string[] = [];
+  runs.forEach((r) => {
+    if (r.breuschPaganPValue !== undefined && r.breuschPaganPValue < 0.05 && !r.isRobust) {
+      flagged.push(`- **${r.module}** (${r.specification}): Breusch-Pagan p = ${r.breuschPaganPValue.toFixed(4)} suggests heteroscedasticity, and robust SEs are not currently enabled. Consider re-running with robust standard errors.`);
+    }
+    if (r.jarqueBeraPValue !== undefined && r.jarqueBeraPValue < 0.05) {
+      flagged.push(`- **${r.module}** (${r.specification}): Jarque-Bera p = ${r.jarqueBeraPValue.toFixed(4)} suggests non-normal residuals.`);
+    }
+    if (r.maxVif !== undefined && r.maxVif > 5) {
+      flagged.push(`- **${r.module}** (${r.specification}): Max VIF = ${r.maxVif.toFixed(2)} indicates possible multicollinearity.`);
+    }
+  });
+
+  if (flagged.length > 0) {
+    lines.push(`**Potential issues detected:**\n${flagged.join('\n')}\n`);
+  } else {
+    lines.push(`No diagnostic red flags detected across your stored runs (based on Breusch-Pagan, Jarque-Bera, and VIF where available).\n`);
+  }
+
+  lines.push(`\n_[API unavailable — this is a local rule-based summary of your stored diagnostics, not an AI-generated response. Your question was: "${question}"]_`);
+
+  return lines.join('\n');
+}
+
 // ==========================================
 // CORE EXPORTED GEMINI SERVICE FUNCTIONS
 // ==========================================
+
+export async function askLabPartner(
+  message: string,
+  history: { role: string; text: string }[] = [],
+  workspaceContext: WorkspaceContext
+): Promise<string> {
+  try {
+    const headers = await getAuthHeaders();
+    const response = await fetch("/api/gemini/lab-partner", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message, history, workspaceContext }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Server returned status ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.response;
+  } catch (error: any) {
+    if (error?.status !== 429 && !error?.message?.includes('429')) console.error("Lab Partner Live API Error (using local fallback):", error);
+    return getLocalLabPartnerAnswer(message, workspaceContext);
+  }
+}
 
 export async function askProfessorDesk(question: string, history: { role: string; text: string }[] = []) {
   try {
@@ -717,4 +805,74 @@ export async function interpretStatsOutput(
     if (error?.status !== 429 && !error?.message?.includes('429')) console.error("Stats Interpreter Live API Error (using high-fidelity local fallback):", error);
     return getLocalStatsInterpretation(toolType, analysisType, rawOutput, researchContext);
   }
+}
+
+export interface RefereeFinding {
+  id: string;
+  severity: 'major' | 'minor';
+  title: string;
+  issue: string;
+  evidence: string;
+  suggestion: string;
+}
+
+export interface RefereeReportResponse {
+  verdict: string;
+  reports: RefereeFinding[];
+}
+
+export async function getRefereeReport(
+  history: any[],
+  datasetMetadata: any
+): Promise<RefereeReportResponse> {
+  try {
+    const headers = await getAuthHeaders();
+    const response = await fetch("/api/gemini/referee-report", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ history, datasetMetadata }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Server returned status ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error?.status !== 429 && !error?.message?.includes('429')) console.error("Referee Report Fetch Error:", error);
+    return {
+      verdict: `Referee report generation is currently unavailable: ${error.message || "API Connection error."} Please review your models manually against standard identification and robustness checks.`,
+      reports: [],
+    };
+  }
+}
+
+export interface RecommendedReadingLink {
+  title: string;
+  url: string;
+}
+
+export interface RecommendedReadingsResponse {
+  response: string;
+  links: RecommendedReadingLink[];
+}
+
+export async function getRecommendedReadings(
+  stageId: string,
+  stageLabel: string
+): Promise<RecommendedReadingsResponse> {
+  const headers = await getAuthHeaders();
+  const response = await fetch("/api/gemini/recommended-readings", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ stageId, stageLabel }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `Server returned status ${response.status}`);
+  }
+
+  return await response.json();
 }

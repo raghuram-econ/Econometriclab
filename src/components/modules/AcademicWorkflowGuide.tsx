@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { safeDownloadFile, copyTextToClipboard } from '../../lib/utils';
 import { ModuleTab } from '../../types';
+import { getRecommendedReadings, RecommendedReadingsResponse } from '../../services/gemini';
+import { Loader2, BookMarked, ExternalLink } from 'lucide-react';
 
 // Steps definition for the pipeline
 interface PipelineStep {
@@ -156,6 +158,34 @@ export function AcademicWorkflowGuide() {
   ];
 
   const activeStep = (pipelineSteps.find(s => s.id === activeStepId) || pipelineSteps[0]) as PipelineStep;
+
+  // Step 1b: Recommended Readings state (maps each pipeline phase onto the
+  // backend's fixed set of research-workflow stages)
+  const [readingsResult, setReadingsResult] = useState<RecommendedReadingsResponse | null>(null);
+  const [readingsLoading, setReadingsLoading] = useState(false);
+  const [readingsError, setReadingsError] = useState<string | null>(null);
+
+  const stageForStep: Record<number, { id: string; label: string }> = {
+    1: { id: 'data-cleaning', label: 'Data Import & Prep' },
+    2: { id: 'regression', label: 'Specification & Estimation' },
+    3: { id: 'regression', label: 'Diagnostic Verification' },
+    4: { id: 'manuscript', label: 'Automated Interpretation' },
+  };
+
+  const handleGetRecommendedReadings = async () => {
+    const stage = stageForStep[activeStepId] || { id: 'data-cleaning', label: 'Data Import & Prep' };
+    setReadingsLoading(true);
+    setReadingsError(null);
+    try {
+      const result = await getRecommendedReadings(stage.id, stage.label);
+      setReadingsResult(result);
+    } catch (err: any) {
+      setReadingsError(err.message || 'Failed to fetch recommended readings.');
+      setReadingsResult(null);
+    } finally {
+      setReadingsLoading(false);
+    }
+  };
 
   // Dynamic Decision Tree Suggestion Logic
   const getDecisionTreeSuggestion = () => {
@@ -572,6 +602,49 @@ Recommended Model Approach: ${decision.model}
                 {activeStep.replicationOutput}
               </div>
             </div>
+          </div>
+
+          {/* Recommended Readings for this pipeline phase */}
+          <div className="bg-white rounded-lg border border-slate-200/60 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                <BookMarked className="w-4 h-4 text-emerald-500" />
+                Recommended Readings for This Phase
+              </h4>
+              <button
+                onClick={handleGetRecommendedReadings}
+                disabled={readingsLoading}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0"
+              >
+                {readingsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BookMarked className="w-3.5 h-3.5" />}
+                {readingsLoading ? 'Searching...' : 'Get Readings'}
+              </button>
+            </div>
+            {readingsError && (
+              <p className="text-xs text-rose-600 font-serif">{readingsError}</p>
+            )}
+            {readingsResult && (
+              <div className="space-y-3 animate-in fade-in duration-300">
+                <p className="text-xs text-slate-700 font-serif leading-relaxed whitespace-pre-wrap">{readingsResult.response}</p>
+                {readingsResult.links.length > 0 && (
+                  <ul className="space-y-1.5 pt-2 border-t border-slate-100">
+                    {readingsResult.links.map((link, i) => (
+                      <li key={i}>
+                        <a
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] text-indigo-600 hover:text-indigo-800 font-serif inline-flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3 shrink-0" />
+                          {link.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>
