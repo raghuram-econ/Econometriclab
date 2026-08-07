@@ -1,11 +1,12 @@
-﻿import express from "express";
+﻿import "dotenv/config";
+import express from "express";
 import path from "path";
 import fs from "fs";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import {
   interpretModelPrompt,
@@ -24,7 +25,7 @@ class AIRequestThrottler {
     timestamp: number;
   }> = [];
   private activeRequests = 0;
-  private maxConcurrency = 2; // Maximum 2 concurrent Gemini API calls
+  private maxConcurrency = 2; // Maximum 2 concurrent AI API calls
   private minIntervalMs = 1200; // Force at least 1.2s delay between initiating sequential calls
   private lastRequestTime = 0;
   private maxQueueSize = 30; // Protect memory from infinite queueing
@@ -250,65 +251,184 @@ async function startServer() {
   app.use("/api/estimate", estimationPayloadValidator);
   app.use(["/api/python/*", "/api/parse-sav"], estimationPayloadValidator);
 
-  // Initialize Gemini lazily/safely
-  const getGeminiClient = () => {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      throw new Error("GEMINI_API_KEY environment variable is required. Please provision it in Settings > Secrets.");
-    }
-    return new GoogleGenAI({
-      apiKey: key,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
-  };
+  // ---- DeepSeek-backed AI client ----
+  // Keeps the original Gemini SDK's call shape (`ai.models.generateContent({model,
+  // contents, config})`, resolving to `{ text }`) so every route handler below --
+  // whether it calls this directly or via generateContentWithFallbackAndRetry --
+  // works completely unchanged. Only the network call underneath moved to DeepSeek.
 
-  const generateContentWithFallbackAndRetry = async (
-    ai: any,
+  // Converts Gemini-style `contents` (a plain prompt string, or an array of
+  // {role: 'user'|'model', parts:[{text}]} turns) plus a system instruction into
+  // an OpenAI-style chat `messages` array, which DeepSeek's API expects.
+  function toDeepSeekMessages(contents: any, systemInstruction?: string): { role: string; content: string }[] {
+    const messages: { role: string; content: string }[] = [];
+    if (systemInstruction) {
+      messages.push({ role: "system", content: systemInstruction });
+    }
+    if (typeof contents === "string") {
+      messages.push({ role: "user", content: contents });
+    } else if (Array.isArray(contents)) {
+      contents.forEach((turn: any) => {
+        const role = turn.role === "model" ? "assistant" : "user";
+        const text = (turn.parts || []).map((p: any) => p.text || "").join("");
+        messages.push({ role, content: text });
+      });
+    }
+    return messages;
+  }
+
+  // Renders a Gemini-style typed schema (Type.OBJECT/ARRAY/STRING/etc.,
+  // properties, required, enum) as a plain-text JSON-shape example, since
+  // DeepSeek has no native schema-validated output -- only response_format:
+  // json_object (valid JSON syntax, not a guaranteed shape). The existing
+  // endpoints' schemas (already written for Gemini) are reused verbatim as the
+  // source of truth for this description; nothing is rewritten per-endpoint.
+  function schemaToSkeleton(schema: any): any {
+    if (!schema) return null;
+    if (schema.enum) return schema.enum[0];
+    if (schema.type === Type.OBJECT) {
+      const obj: any = {};
+      Object.entries(schema.properties || {}).forEach(([key, propSchema]) => {
+        obj[key] = schemaToSkeleton(propSchema);
+      });
+      return obj;
+    }
+    if (schema.type === Type.ARRAY) return [schemaToSkeleton(schema.items)];
+    if (schema.type === Type.INTEGER || schema.type === Type.NUMBER) return 0;
+    if (schema.type === Type.BOOLEAN) return true;
+    return "string";
+  }
+
+  function geminiSchemaToPromptText(schema: any): string {
+    return `Respond with a single JSON object matching exactly this shape (no markdown code fences, no extra commentary -- JSON only):\n${JSON.stringify(schemaToSkeleton(schema), null, 2)}`;
+  }
+
+  // Minimal structural check -- confirms every `required` field (recursively)
+  // is present and enum values are one of the allowed options. Not full
+  // JSON-Schema type conformance: this catches "model forgot a field" / "model
+  // wrapped it in prose," which is the failure mode that actually matters here.
+  function validateAgainstSchema(value: any, schema: any, path = "root"): void {
+    if (!schema) return;
+    if (schema.type === Type.OBJECT) {
+      if (!value || typeof value !== "object") {
+        throw new Error(`AI response missing/invalid object at ${path}`);
+      }
+      (schema.required || []).forEach((key: string) => {
+        if (!(key in value)) {
+          throw new Error(`AI response missing required field "${key}" at ${path}`);
+        }
+      });
+      Object.entries(schema.properties || {}).forEach(([key, propSchema]) => {
+        if (key in value) validateAgainstSchema(value[key], propSchema, `${path}.${key}`);
+      });
+    } else if (schema.type === Type.ARRAY) {
+      if (!Array.isArray(value)) {
+        throw new Error(`AI response expected an array at ${path}`);
+      }
+      value.forEach((item: any, i: number) => validateAgainstSchema(item, schema.items, `${path}[${i}]`));
+    } else if (schema.enum && !schema.enum.includes(value)) {
+      throw new Error(`AI response value "${value}" at ${path} is not one of the allowed options: ${schema.enum.join(", ")}`);
+    }
+  }
+
+  async function deepSeekGenerateContent(apiKey: string, options: { model?: string; contents: any; config?: any }): Promise<{ text: string }> {
+    const config = options.config || {};
+    const wantsJson = config.responseMimeType === "application/json" && config.responseSchema;
+
+    const systemInstruction = wantsJson
+      ? `${config.systemInstruction || ""}\n\n${geminiSchemaToPromptText(config.responseSchema)}`
+      : config.systemInstruction;
+
+    const messages = toDeepSeekMessages(options.contents, systemInstruction);
+
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+        // Optional OpenRouter attribution headers -- affects leaderboard
+        // ranking only, not required for the request to function.
+        "HTTP-Referer": process.env.PUBLIC_APP_URL || "https://econometrics-lab.onrender.com",
+        "X-Title": "Econometrics Lab",
+      },
+      body: JSON.stringify({
+        model: process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat",
+        messages,
+        temperature: config.temperature ?? 0.3,
+        ...(wantsJson ? { response_format: { type: "json_object" } } : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      const err: any = new Error(`OpenRouter API error (${response.status}): ${errText}`);
+      err.status = response.status;
+      throw err;
+    }
+
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content || "";
+
+    if (wantsJson) {
+      const parsed = JSON.parse(text.trim());
+      validateAgainstSchema(parsed, config.responseSchema);
+    }
+
+    return { text };
+  }
+
+  async function deepSeekGenerateContentWithRetry(
+    apiKey: string,
     options: { model?: string; contents: any; config?: any },
     maxRetries = 2,
     initialDelay = 1000
-  ): Promise<any> => {
+  ): Promise<{ text: string }> {
     let attempt = 0;
-    const initialModel = "gemini-3.5-flash";
-    const modelsToTry = ["gemini-3.5-flash"];
-    const uniqueModels = Array.from(new Set(modelsToTry));
+    while (true) {
+      try {
+        return await deepSeekGenerateContent(apiKey, options);
+      } catch (error: any) {
+        const isRetryable = error?.status === 429 || error?.status === 503 ||
+          error?.message?.includes('429') || error?.message?.includes('503') ||
+          error?.message?.includes('UNAVAILABLE') || error?.message?.includes('RESOURCE_EXHAUSTED') ||
+          error?.message?.includes('high demand');
 
-    for (const modelName of uniqueModels) {
-      attempt = 0;
-      while (attempt <= maxRetries) {
-        try {
-          return await ai.models.generateContent({
-            ...options,
-            model: modelName,
-          });
-        } catch (error: any) {
-          const isRetryable = error?.status === 503 || error?.status === 429 || 
-                              error?.message?.includes('503') || error?.message?.includes('429') ||
-                              error?.message?.includes('UNAVAILABLE') || error?.message?.includes('RESOURCE_EXHAUSTED') ||
-                              error?.message?.includes('high demand');
-          
-          if (isRetryable && attempt < maxRetries) {
-            attempt++;
-            const delay = initialDelay * Math.pow(2, attempt - 1);
-            console.warn(`Gemini API returned retryable error for model ${modelName} (attempt ${attempt}/${maxRetries}): ${error.message || error}. Retrying in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-          } else {
-            console.warn(`Model ${modelName} failed with error: ${error.message || error}. Trying next fallback model if available...`);
-            break;
-          }
+        if (isRetryable && attempt < maxRetries) {
+          attempt++;
+          const delay = initialDelay * Math.pow(2, attempt - 1);
+          console.warn(`DeepSeek API returned retryable error (attempt ${attempt}/${maxRetries}): ${error.message || error}. Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
         }
+        // Not retryable (or retries exhausted): re-throw so the caller's
+        // existing catch block / local-fallback path takes over, exactly as
+        // it did for a final Gemini failure before this migration.
+        throw error;
       }
     }
-    
-    // If all failed, make one final attempt with gemini-3.5-flash and let it throw
-    return await ai.models.generateContent({
-      ...options,
-      model: "gemini-3.5-flash",
-    });
+  }
+
+  // Initialize AI client lazily/safely. Name kept as `getGeminiClient` (now
+  // routed through OpenRouter to DeepSeek) so the ~15 route handlers below
+  // that call it don't need to change.
+  const getGeminiClient = () => {
+    const key = process.env.OPENROUTER_API_KEY;
+    if (!key) {
+      throw new Error("OPENROUTER_API_KEY environment variable is required. Please provision it in Settings > Secrets.");
+    }
+    return {
+      models: {
+        generateContent: (options: { model?: string; contents: any; config?: any }) =>
+          deepSeekGenerateContentWithRetry(key, options),
+      },
+    };
+  };
+
+  const generateContentWithFallbackAndRetry = async (
+    ai: { models: { generateContent: (options: any) => Promise<{ text: string }> } },
+    options: { model?: string; contents: any; config?: any }
+  ): Promise<{ text: string }> => {
+    return ai.models.generateContent(options);
   };
 
   // API routes
@@ -993,7 +1113,7 @@ CORE RULES:
       });
 
       const response = await generateContentWithFallbackAndRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents,
         config: {
           systemInstruction,
@@ -1036,7 +1156,7 @@ Mode: ${mode}
 Level: MA/UGC-NET Economics`;
 
       const response = await generateContentWithFallbackAndRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           systemInstruction,
@@ -1085,7 +1205,7 @@ STUDENT ANSWER FOR EVALUATION: ${studentAnswer}
 EXAM TARGET: ${level}`;
 
       const response = await generateContentWithFallbackAndRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           systemInstruction,
@@ -1147,7 +1267,7 @@ Please parse these outputs and populate both the beginner and advanced econometr
 Crucially, ensure that the "interpretationCautions" section ends with an epistemic-boundary paragraph in plain language, describing exactly what the estimate can NOT claim (selection bias, omitted variables, and no causal identification unless a design explicitly supports it). Cite only numbers present in the RESULTS (JSON). For the advanced review, write technical memo-style evaluations, provide model spec, diagnostic summaries, and extensions using Unicode math (no LaTeX!).`;
 
       const response = await generateContentWithFallbackAndRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           systemInstruction,
@@ -1226,6 +1346,53 @@ Crucially, ensure that the "interpretationCautions" section ends with an epistem
     }
   });
 
+  app.post("/api/gemini/lab-partner", async (req, res) => {
+    try {
+      const { message, history = [], workspaceContext } = req.body;
+      if (!message) {
+        return res.status(400).json({ error: "message parameter is required" });
+      }
+
+      const ai = getGeminiClient();
+
+      const systemInstruction = `You are "Lab Partner", a workspace-aware research assistant embedded in the Economics Learning Lab econometrics platform. You can see a summary of the user's current dataset and every model they have run this session, provided to you as WORKSPACE CONTEXT (JSON).
+
+CRITICAL RULES:
+1. Only reference numbers, variables, dataset names, or diagnostic statistics that literally appear in the WORKSPACE CONTEXT JSON. Never invent, estimate, or extrapolate a value that is not present. If something isn't in the context, say you don't have that information.
+2. Always answer in plain, conversational markdown text (short paragraphs, bullet points where helpful). NEVER reply with raw JSON or code blocks containing JSON — the user is reading this as chat, not consuming structured data.
+3. The renderer does not support LaTeX. Use Unicode math notation only (e.g. "β", "R²", "p < 0.05"), never $...$ or \\frac{}{}.
+4. When flagging a statistical issue (e.g. heteroscedasticity via Breusch-Pagan, non-normal residuals via Jarque-Bera, multicollinearity via VIF), cite the specific run and the specific statistic value from the context that supports the flag.
+5. If the WORKSPACE CONTEXT has no runs yet, say so plainly and suggest the user run an analysis first.
+6. Keep answers focused and useful — avoid generic econometrics lecturing unless asked; ground everything in the user's actual workspace.`;
+
+      const contents = history.map((h: any) => ({
+        role: h.role === 'user' ? 'user' : 'model',
+        parts: [{ text: h.text }]
+      }));
+
+      const contextJson = `\n\nWORKSPACE CONTEXT (JSON):\n${JSON.stringify(workspaceContext || {}, null, 2)}`;
+
+      contents.push({
+        role: 'user',
+        parts: [{ text: message + contextJson }]
+      });
+
+      const response = await generateContentWithFallbackAndRetry(ai, {
+        model: "deepseek-v4-pro",
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.2,
+        }
+      });
+
+      res.json({ response: response.text });
+    } catch (error: any) {
+      if (error?.status !== 429 && !error?.message?.includes('429')) console.error("Lab Partner Error:", error);
+      res.status(500).json({ error: error.message || "Failed to reach Lab Partner" });
+    }
+  });
+
   app.post("/api/gemini/specification-curve-summary", async (req, res) => {
     try {
       const { specifications, yVar, xVar } = req.body;
@@ -1263,7 +1430,7 @@ Please write a highly rigorous, 2-paragraph academic summary following this form
 "The estimated effect of ${xVar} on ${yVar} ranges from [X] to [Y] across [N] specifications, with a median estimate of [M]... The effect loses statistical significance when..."`;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           systemInstruction,
@@ -1291,7 +1458,7 @@ Please write a highly rigorous, 2-paragraph academic summary following this form
       CRITICAL RULE: If a statistic is not present in the provided RESULTS JSON, return null and never invent a value. Cite only numbers present in the raw output.`;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           temperature: 0.3
@@ -1400,7 +1567,7 @@ ${ruleViolations.map((v, i) => `${i+1}. ${v}`).join("\n")}
 Please generate the referee report conforming exactly to the JSON schema.`;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           systemInstruction,
@@ -1467,7 +1634,7 @@ CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical valu
       `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           systemInstruction: systemPrompt
@@ -1551,7 +1718,7 @@ CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical valu
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -1598,7 +1765,7 @@ CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical valu
       const prompt = generateReportPrompt(rqStr, modelRuns, robustnessItems);
 
       const result = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
       });
 
@@ -1639,7 +1806,7 @@ CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical valu
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -1700,7 +1867,7 @@ CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical valu
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -1759,7 +1926,7 @@ CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical valu
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -2110,7 +2277,7 @@ CORE RULES:
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
         config: {
           systemInstruction,
@@ -2317,7 +2484,7 @@ CORE RULES:
       prompt += `\nAdditional journal styling requirement: Please draft this section in a ${styleGuidance} suited for ${targetJournalName}.\n`;
 
       const result = await generateContentWithFallbackAndRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: "deepseek-v4-pro",
         contents: prompt,
       });
 
@@ -2350,53 +2517,68 @@ CORE RULES:
         searchFocus = "seminal papers in economic theory and methodology.";
       }
 
+      // Search first, with Tavily -- real results the model can't fabricate
+      // around, since generation only ever sees what search actually found.
+      const tavilyKey = process.env.TAVILY_API_KEY;
+      if (!tavilyKey) {
+        throw new Error("TAVILY_API_KEY environment variable is required. Please provision it in Settings > Secrets.");
+      }
+
+      const tavilyResponse = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: tavilyKey,
+          query: `${searchFocus} for the "${stageLabel}" phase of economics research`,
+          max_results: 5,
+        }),
+      });
+
+      if (!tavilyResponse.ok) {
+        const errText = await tavilyResponse.text();
+        throw new Error(`Tavily search error (${tavilyResponse.status}): ${errText}`);
+      }
+
+      const tavilyData = await tavilyResponse.json();
+      const searchResults: { title: string; url: string; content: string }[] = (tavilyData.results || [])
+        .filter((r: any) => r.url && r.title)
+        .slice(0, 5)
+        .map((r: any) => ({ title: r.title, url: r.url, content: (r.content || "").slice(0, 500) }));
+
+      if (searchResults.length === 0) {
+        throw new Error("Tavily returned no search results for this stage.");
+      }
+
+      // Links displayed to the user are built directly from the real search
+      // results, never parsed out of the model's response -- what's shown is
+      // guaranteed to be what Tavily actually found, not what the model claims
+      // it found.
+      const links = searchResults.map(r => ({ title: r.title, url: r.url }));
+
       const ai = getGeminiClient();
 
       const systemInstruction = `You are an elite Academic Research Librarian specializing in Economics and Econometrics.
-Your task is to identify and summarize 3 to 5 of the most seminal, highly cited papers, textbooks, or methodology guides relevant to the student's current research phase.
-You must use Google Search grounding to find real, accurate, and active references with high-quality URLs. Do not make up URLs under any circumstances.
-CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate a publication title, author name, year, journal, or URL. Under no circumstances may you output fictional academic papers or placeholder links. If a search result does not explicitly verify the details of a reference, do NOT recommend it.
-Provide a concise, professional paragraph for each paper, summarizing its core economic insight, theoretical or econometric contribution, and why an economics student in the "${stageLabel}" phase must read it.
-Always return response in clean Markdown. Include inline links with the syntax [Title](URL) so the student can directly access them. Keep your tone encouraging, scholarly, and helpful.`;
+Your task is to write a concise, professional paragraph for each of the search results provided below, summarizing its core economic insight, theoretical or econometric contribution, and why an economics student in the "${stageLabel}" phase must read it.
+CRITICAL MANDATE: You may ONLY discuss the search results listed below. Do NOT add, substitute, invent, or reference any publication, author, title, or URL that is not explicitly listed. If a listed result's content doesn't give enough detail to write a confident paragraph, write a shorter one grounded only in what's given rather than inventing detail.
+Always return response in clean Markdown. Include inline links with the syntax [Title](URL) using the exact URLs given. Keep your tone encouraging, scholarly, and helpful.`;
 
-      const prompt = `Find 3 to 5 highly seminal and relevant papers, textbooks, or resources in economics/econometrics for the "${stageLabel}" research phase.
-Focus specifically on: ${searchFocus}
-Ensure all recommended items have valid, real-world titles and URLs retrieved via Google Search.`;
+      const prompt = `Write recommended-reading summaries for the "${stageLabel}" research phase using ONLY these real search results (JSON):
+${JSON.stringify(searchResults, null, 2)}`;
 
       const result = await generateContentWithFallbackAndRetry(ai, {
-        model: "gemini-3.5-flash",
         contents: prompt,
         config: {
           systemInstruction,
           temperature: 0.3,
-          tools: [{ googleSearch: {} }],
         }
       });
-
-      // Extract grounded links if available
-      const rawChunks = result.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-      const linksMap = new Map();
-      rawChunks.forEach((chunk: any) => {
-        if (chunk.web) {
-          const url = chunk.web.uri || chunk.web.url;
-          const title = chunk.web.title || "Grounded Reference";
-          if (url && !linksMap.has(url)) {
-            linksMap.set(url, title);
-          }
-        }
-      });
-
-      const links = Array.from(linksMap.entries()).map(([url, title]) => ({
-        title,
-        url
-      }));
 
       res.json({
         response: result.text || "",
         links
       });
     } catch (error: any) {
-      console.warn("Recommended Readings Gemini API Error (Using curated academic fallback):", error.message);
+      console.warn("Recommended Readings Error (Tavily/DeepSeek -- using curated academic fallback):", error.message);
       
       const fallbacks: Record<string, { response: string, links: { title: string, url: string }[] }> = {
         'ideation': {
