@@ -367,11 +367,24 @@ async function startServer() {
     }
 
     const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || "";
+    let text = data.choices?.[0]?.message?.content || "";
 
     if (wantsJson) {
-      const parsed = JSON.parse(text.trim());
+      let parsed = JSON.parse(text.trim());
+      // OpenRouter/OpenAI-style `response_format: json_object` requires the
+      // model to emit a JSON *object*, so for an array-rooted schema (e.g.
+      // generate-quiz) the model wraps the array in a single-key object
+      // (e.g. {"questions": [...]}) instead of returning it bare, unlike
+      // Gemini's arbitrary-root-type structured output this replaced.
+      // Unwrap that single array-valued property before validating.
+      if (config.responseSchema?.type === Type.ARRAY && !Array.isArray(parsed) && parsed && typeof parsed === "object") {
+        const arrayValues = Object.values(parsed).filter((v) => Array.isArray(v));
+        if (arrayValues.length === 1) {
+          parsed = arrayValues[0];
+        }
+      }
       validateAgainstSchema(parsed, config.responseSchema);
+      text = JSON.stringify(parsed);
     }
 
     return { text };
