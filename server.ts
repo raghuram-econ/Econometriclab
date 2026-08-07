@@ -494,6 +494,7 @@ async function startServer() {
     "/api/python/garch": "/python/garch",
     "/api/python/unit-root": "/python/unit-root",
     "/api/python/rdd": "/python/rdd",
+    "/api/python/rdd-fuzzy": "/python/rdd-fuzzy",
     "/api/python/power": "/python/power",
     "/api/python/synthetic-control": "/python/synthetic-control",
     "/api/python/staggered-did": "/python/staggered-did",

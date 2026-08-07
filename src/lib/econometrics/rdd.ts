@@ -1,4 +1,5 @@
 import { runOLS } from './ols';
+import { estimateModel } from './estimators';
 
 /**
  * Sharp Regression Discontinuity via local linear regression.
@@ -116,6 +117,183 @@ export function runSharpRDD(
       bandwidthSelector +
       '. Not directly comparable to rdrobust (IK/CCT bandwidth, triangular kernel, bias-corrected).',
     cutoff,
+    totalObs: filteredData.length,
+    includedObs: localData.length
+  };
+}
+
+/**
+ * Fuzzy Regression Discontinuity via local linear 2SLS.
+ *
+ * Fuzzy RDD applies when crossing the cutoff shifts the *probability* of
+ * treatment rather than deterministically assigning it (imperfect
+ * compliance) -- e.g. eligibility crosses a threshold but not everyone
+ * eligible takes up treatment. The estimand is a Local Average Treatment
+ * Effect (LATE) at the cutoff, identified by instrumenting the (possibly
+ * imperfect) treatment indicator with the above/below-cutoff indicator.
+ *
+ * Specification, estimated on observations within `bandwidth` of the
+ * cutoff with a UNIFORM kernel (every included observation weighted
+ * equally), via 2SLS (reusing `estimateModel('IV', ...)` from
+ * `estimators.ts` for the actual first/second-stage math):
+ *   First stage:  D_actual ~ D_above_cutoff + (X - c)
+ *   Second stage: Y ~ D_actual_hat + (X - c)
+ * where D_above_cutoff = 1{X >= c} is the excluded instrument and
+ * D_actual is the observed (imperfect) treatment-status column.
+ *
+ * IMPORTANT -- this does not replicate Stata's `rdrobust` or R's rdrobust
+ * package (fuzzy=). Those use an MSE-optimal bandwidth selector (IK / CCT),
+ * a triangular kernel, and a bias-corrected point estimate with robust
+ * confidence intervals for both the first-stage and fuzzy (Wald-ratio)
+ * estimates. Estimates here will differ, and the difference is driven
+ * mainly by the bandwidth. Report the bandwidth and selector alongside any
+ * estimate, and prefer supplying an explicit `bandwidthOverride` when you
+ * need results comparable to another package.
+ *
+ * @param treatmentVar Column holding the actual (possibly imperfect)
+ *   treatment-status indicator -- distinct from `xVar` vs `cutoff`.
+ * @param bandwidthOverride Explicit bandwidth. When omitted, a Silverman
+ *   rule-of-thumb value is used, which is NOT an RDD-optimal selector.
+ */
+export function runFuzzyRDD(
+  data: any[],
+  yVar: string,
+  xVar: string,
+  treatmentVar: string,
+  cutoff: number,
+  bandwidthOverride?: number
+) {
+  // Filter out missing data
+  const filteredData = (data || []).filter(row => {
+    return row && row[yVar] !== undefined && row[yVar] !== null && !isNaN(parseFloat(row[yVar])) &&
+           row[xVar] !== undefined && row[xVar] !== null && !isNaN(parseFloat(row[xVar])) &&
+           row[treatmentVar] !== undefined && row[treatmentVar] !== null && !isNaN(parseFloat(row[treatmentVar]));
+  });
+
+  if (filteredData.length < 8) {
+    throw new Error('Insufficient observations for Fuzzy RDD estimation.');
+  }
+
+  // Calculate bandwidth using standard deviation of forcing variable (Silverman rule of thumb)
+  const xValues = filteredData.map(r => parseFloat(r[xVar]));
+  const meanX = xValues.reduce((sum, val) => sum + val, 0) / xValues.length;
+  const varianceX = xValues.reduce((sum, val) => sum + Math.pow(val - meanX, 2), 0) / (xValues.length - 1);
+  const stdX = Math.sqrt(varianceX) || 1.0;
+
+  // NOTE: Silverman's rule is a kernel-DENSITY selector, not an RDD MSE-optimal
+  // selector. It is retained only as a fallback default; see the function docblock.
+  const silvermanBandwidth = 1.06 * stdX * Math.pow(filteredData.length, -0.2);
+
+  let bandwidth = silvermanBandwidth;
+  let bandwidthSelector: 'user-specified' | 'silverman-rule-of-thumb' = 'silverman-rule-of-thumb';
+
+  if (bandwidthOverride !== undefined && bandwidthOverride !== null) {
+    if (!Number.isFinite(bandwidthOverride) || bandwidthOverride <= 0) {
+      throw new Error(`Invalid bandwidth: ${bandwidthOverride}. Bandwidth must be a positive finite number.`);
+    }
+    bandwidth = bandwidthOverride;
+    bandwidthSelector = 'user-specified';
+  }
+
+  // Filter observations within bandwidth of cutoff
+  const localData = filteredData.filter(row => {
+    const xVal = parseFloat(row[xVar]);
+    return Math.abs(xVal - cutoff) <= bandwidth;
+  });
+
+  if (localData.length < 8) {
+    throw new Error(`Insufficient observations within local Fuzzy RDD bandwidth (${bandwidth.toFixed(3)}). Please choose a different cutoff or expand the dataset.`);
+  }
+
+  // Construct local regression variables
+  // _D_above_cutoff = 1 if X >= cutoff, 0 otherwise (the excluded instrument)
+  // _X_tilde = X - cutoff (centered running variable)
+  // _treatment_status = the actual (possibly imperfect) treatment indicator
+  const rddData = localData.map((row, idx) => {
+    const xVal = parseFloat(row[xVar]);
+    const dAbove = xVal >= cutoff ? 1 : 0;
+    const xTilde = xVal - cutoff;
+    return {
+      ...row,
+      _rdd_idx: idx,
+      _D_above_cutoff: dAbove,
+      _X_tilde: xTilde,
+      _treatment_status: parseFloat(row[treatmentVar])
+    };
+  });
+
+  // First-stage relevance check: the instrument must actually shift observed
+  // treatment take-up within the window, or 2SLS is not identified.
+  const uniqueTreatment = new Set(rddData.map(r => r._treatment_status));
+  if (uniqueTreatment.size < 2) {
+    throw new Error('The treatment-status variable is constant within the bandwidth window; Fuzzy RDD requires variation in actual treatment take-up.');
+  }
+
+  // 2SLS: instrument the (possibly imperfect) treatment indicator with the
+  // above/below-cutoff indicator, controlling for the centered running
+  // variable in both stages. Reuses the tested IV/2SLS machinery rather
+  // than re-deriving it by hand.
+  const ivResult = estimateModel('IV', {
+    data: rddData,
+    yVar,
+    xVars: ['_treatment_status', '_X_tilde'],
+    includeIntercept: true,
+    endogenousVar: '_treatment_status',
+    instruments: ['_D_above_cutoff']
+  });
+
+  // Extract LATE coefficient (associated with _treatment_status)
+  const treatmentCoef = ivResult.coefficients.find(c => c.variable === '_treatment_status');
+  if (!treatmentCoef) {
+    throw new Error('Could not identify the instrumented treatment-effect coefficient from the Fuzzy RDD local 2SLS regression.');
+  }
+
+  // Rename variables in coefficients list for academic output
+  ivResult.coefficients = ivResult.coefficients.map(c => {
+    if (c.variable === '_treatment_status') return { ...c, variable: 'LATE (Instrumented Treatment Effect)' };
+    if (c.variable === '_X_tilde') return { ...c, variable: 'Forcing Variable (Centered)' };
+    return c;
+  });
+
+  // First-stage compliance jump (reported for diagnostic purposes only --
+  // the probability that crossing the cutoff shifts actual treatment status),
+  // via a local linear regression of treatment status on the instrument and
+  // the centered running variable.
+  let firstStage: ReturnType<typeof runOLS> | null = null;
+  let firstStageJump: number | undefined;
+  let firstStageSE: number | undefined;
+  let firstStagePValue: number | undefined;
+  try {
+    firstStage = runOLS(rddData, '_treatment_status', ['_D_above_cutoff', '_X_tilde'], true, false);
+    const jumpCoef = firstStage.coefficients.find(c => c.variable === '_D_above_cutoff');
+    firstStageJump = jumpCoef?.estimate;
+    firstStageSE = jumpCoef?.stdError;
+    firstStagePValue = jumpCoef?.pValue;
+  } catch (_e) {
+    firstStage = null;
+  }
+
+  return {
+    ivResult,
+    rddEstimate: treatmentCoef.estimate,
+    rddStdError: treatmentCoef.stdError,
+    rddTStat: treatmentCoef.tStat,
+    rddPValue: treatmentCoef.pValue,
+    firstStage,
+    firstStageJump,
+    firstStageSE,
+    firstStagePValue,
+    bandwidth,
+    bandwidthSelector,
+    silvermanBandwidth,
+    kernel: 'uniform' as const,
+    biasCorrected: false,
+    methodNote:
+      'Local linear Fuzzy RDD (2SLS), uniform kernel, no bias correction. Bandwidth selector: ' +
+      bandwidthSelector +
+      '. Not directly comparable to rdrobust with fuzzy= (IK/CCT bandwidth, triangular kernel, bias-corrected Wald estimate).',
+    cutoff,
+    treatmentVar,
     totalObs: filteredData.length,
     includedObs: localData.length
   };

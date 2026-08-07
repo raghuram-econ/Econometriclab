@@ -16,7 +16,7 @@ import * as math from 'mathjs';
 import { jacobiEigenvalues } from '../../../components/modules/FactorAnalysisLab';
 import { fitLogisticRegression } from '../../../components/modules/TreatmentEffectsLab';
 import { estimateModel } from '../estimators';
-import { runSharpRDD } from '../rdd';
+import { runSharpRDD, runFuzzyRDD } from '../rdd';
 
 let seed = 1;
 const setSeed = (s: number) => { seed = s; };
@@ -200,6 +200,64 @@ describe('Sharp RDD reports its own method honestly', () => {
       const res: any = runSharpRDD(rows, 'y', 'x', 0, h);
       expect(Math.abs(res.rddEstimate - 3.0)).toBeLessThan(0.6);
     }
+  });
+});
+
+describe('Fuzzy RDD reports its own method honestly and recovers a known LATE', () => {
+  // Imperfect-compliance DGP: crossing x=0 shifts the *probability* of
+  // treatment take-up from 0.2 to 0.7 (not deterministic assignment), and
+  // the outcome responds only to actual treatment status with a known
+  // effect of 3.0 -- the true LATE this test checks the estimator recovers.
+  const build = (n = 4000) => {
+    setSeed(2024);
+    const rows: any[] = [];
+    for (let i = 0; i < n; i++) {
+      const x = rnd() * 20 - 10;
+      const pTreat = Math.min(1, Math.max(0, 0.2 + 0.01 * (x + 10) + (x >= 0 ? 0.5 : 0)));
+      const d = rnd() < pTreat ? 1 : 0;
+      const y = 5 + 0.8 * x + 3.0 * d + (rnd() - 0.5) * 2;
+      rows.push({ x, d, y });
+    }
+    return rows;
+  };
+
+  it('discloses kernel, bias correction and bandwidth selector', () => {
+    const res: any = runFuzzyRDD(build(), 'y', 'x', 'd', 0);
+    expect(res.kernel).toBe('uniform');
+    expect(res.biasCorrected).toBe(false);
+    expect(res.bandwidthSelector).toBe('silverman-rule-of-thumb');
+    expect(res.methodNote).toContain('rdrobust');
+  });
+
+  it('honours an explicit bandwidth and labels it as user-specified', () => {
+    const res: any = runFuzzyRDD(build(), 'y', 'x', 'd', 0, 3.0);
+    expect(res.bandwidth).toBe(3.0);
+    expect(res.bandwidthSelector).toBe('user-specified');
+  });
+
+  it('rejects a non-positive or non-finite bandwidth', () => {
+    for (const bad of [0, -1, NaN]) {
+      expect(() => runFuzzyRDD(build(), 'y', 'x', 'd', 0, bad)).toThrow(/bandwidth/i);
+    }
+  });
+
+  it('reports a first-stage compliance jump consistent with the DGP (~0.5)', () => {
+    const rows = build();
+    const res: any = runFuzzyRDD(rows, 'y', 'x', 'd', 0, 5.0);
+    expect(Math.abs(res.firstStageJump - 0.5)).toBeLessThan(0.15);
+  });
+
+  it('recovers the known LATE (3.0) via local 2SLS across a range of bandwidths', () => {
+    const rows = build();
+    for (const h of [3, 5, 8]) {
+      const res: any = runFuzzyRDD(rows, 'y', 'x', 'd', 0, h);
+      expect(Math.abs(res.rddEstimate - 3.0)).toBeLessThan(1.0);
+    }
+  });
+
+  it('refuses estimation when treatment status is constant within the bandwidth', () => {
+    const rows = build().map(r => ({ ...r, d: 1 }));
+    expect(() => runFuzzyRDD(rows, 'y', 'x', 'd', 0)).toThrow(/variation|constant/i);
   });
 });
 

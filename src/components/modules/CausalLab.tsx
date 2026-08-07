@@ -16,8 +16,8 @@ import {
 } from 'lucide-react';
 import { runOLS } from '../../lib/econometrics/ols';
 import { estimateModel } from '../../lib/econometrics/estimators';
-import { runSharpRDD } from '../../lib/econometrics/rdd';
-import { runGMM, runRDDPy, runSyntheticControl, runStaggeredDID } from '../../services/apiClient';
+import { runSharpRDD, runFuzzyRDD } from '../../lib/econometrics/rdd';
+import { runGMM, runRDDPy, runFuzzyRDDPy, runSyntheticControl, runStaggeredDID } from '../../services/apiClient';
 import { useStore } from '../../store/useStore';
 import { Dataset, AnalysisResult } from '../../types';
 import { cn, fmt, fmtP, stars, copyTextToClipboard } from '../../lib/utils';
@@ -70,6 +70,10 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [rdPolynomial, setRdPolynomial] = useState<'linear' | 'quadratic'>('linear');
   const [rdResult, setRdResult] = useState<any | null>(null);
   const [researchGradeRd, setResearchGradeRd] = useState(false);
+  // Fuzzy RD (imperfect compliance): a separate treatment-status column,
+  // distinct from the above/below-cutoff indicator implied by rdRunning vs rdCutoff.
+  const [rdDesign, setRdDesign] = useState<'sharp' | 'fuzzy'>('sharp');
+  const [rdTreatment, setRdTreatment] = useState('');
 
   // Dynamic Panel GMM State (Arellano-Bond / Blundell-Bond, Python backend)
   const [gmmType, setGmmType] = useState<'difference' | 'system'>('difference');
@@ -316,6 +320,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   // --- REGRESSION DISCONTINUITY ESTIMATOR ---
   const handleRunRD = () => {
     if (!rdOutcome || !rdRunning) return;
+    if (rdDesign === 'fuzzy' && !rdTreatment) return;
 
     // Research-grade path: rdrobust (MSE-optimal bandwidth + bias correction).
     if (researchGradeRd) {
@@ -325,6 +330,31 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
         try {
           const data = dataset.data || [];
           const cutoff = Number(rdCutoff) || 0;
+
+          if (rdDesign === 'fuzzy') {
+            const rows = data.filter(r =>
+              !isNaN(parseFloat(r[rdOutcome])) && !isNaN(parseFloat(r[rdRunning])) && !isNaN(parseFloat(r[rdTreatment]))
+            );
+            const res = await runFuzzyRDDPy({
+              y: rows.map(r => parseFloat(r[rdOutcome])),
+              x: rows.map(r => parseFloat(r[rdRunning])),
+              treatment: rows.map(r => parseFloat(r[rdTreatment])),
+              cutoff,
+            });
+            setRdResult({
+              engine: 'python',
+              design: 'fuzzy',
+              rdEstimate: res.coef, rdSE: res.seRobust, rdP: res.pValueRobust,
+              rdT: (typeof res.coef === 'number' && res.seRobust) ? res.coef / res.seRobust : 0,
+              ciLow: res.ciLow, ciHigh: res.ciHigh, bandwidth: res.bandwidth, nUsed: res.nUsed,
+              firstStageCoef: res.firstStageCoef, firstStageSE: res.firstStageSERobust, firstStageP: res.firstStagePValueRobust,
+              cutoff, rdOutcome, rdRunning, rdTreatment,
+              specification: `Fuzzy RDD (rdrobust): ${rdOutcome} LATE at ${rdRunning} = ${cutoff}, instrumented by crossing via ${rdTreatment}`,
+            });
+            onRunComplete({ type: 'generic', specification: `Fuzzy RDD (rdrobust): ${rdOutcome}`, results: res });
+            return;
+          }
+
           const rows = data.filter(r => !isNaN(parseFloat(r[rdOutcome])) && !isNaN(parseFloat(r[rdRunning])));
           const res = await runRDDPy({
             y: rows.map(r => parseFloat(r[rdOutcome])),
@@ -333,6 +363,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
           });
           setRdResult({
             engine: 'python',
+            design: 'sharp',
             rdEstimate: res.coef, rdSE: res.seRobust, rdP: res.pValueRobust,
             rdT: (typeof res.coef === 'number' && res.seRobust) ? res.coef / res.seRobust : 0,
             ciLow: res.ciLow, ciHigh: res.ciHigh, bandwidth: res.bandwidth, nUsed: res.nUsed,
@@ -346,6 +377,50 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
           setIsEstimating(false);
         }
       })();
+      return;
+    }
+
+    // Fast browser path, fuzzy design: local 2SLS via runFuzzyRDD.
+    if (rdDesign === 'fuzzy') {
+      setIsEstimating(true);
+      setEstimationError(null);
+      try {
+        const data = dataset.data || [];
+        const cutoff = Number(rdCutoff) || 0;
+        const bandwidthOverride = rdBandwidth ? Number(rdBandwidth) : undefined;
+        const fuzzy = runFuzzyRDD(data, rdOutcome, rdRunning, rdTreatment, cutoff, bandwidthOverride);
+
+        const formattedResult = {
+          design: 'fuzzy',
+          rdEstimate: fuzzy.rddEstimate,
+          rdSE: fuzzy.rddStdError,
+          rdT: fuzzy.rddTStat,
+          rdP: fuzzy.rddPValue,
+          fuzzy,
+          belowCount: undefined,
+          aboveCount: undefined,
+          cutoff,
+          bandwidth: fuzzy.bandwidth,
+          specification: `Fuzzy RD (2SLS Local Linear): ${rdOutcome} LATE at ${rdRunning} = ${cutoff}, instrumented by crossing via ${rdTreatment}`,
+          rdOutcome,
+          rdRunning,
+          rdTreatment,
+          rdCutoff: cutoff,
+          rdBandwidth: fuzzy.bandwidth,
+          causalType: 'rd'
+        };
+
+        setRdResult(formattedResult);
+        onRunComplete({
+          type: 'generic',
+          specification: formattedResult.specification,
+          results: formattedResult
+        });
+      } catch (err: any) {
+        setEstimationError(`Estimation error: ${err.message || err}`);
+      } finally {
+        setIsEstimating(false);
+      }
       return;
     }
 
@@ -414,6 +489,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
       } catch (_e) { certified = null; }
 
       const formattedResult = {
+        design: 'sharp',
         rdEstimate,
         certified,
         rdSE,
@@ -1192,6 +1268,28 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
               RD Design Specification
             </h3>
 
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => { setRdDesign('sharp'); setRdResult(null); }}
+                className={cn("p-2 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition",
+                  rdDesign === 'sharp' ? 'border-[#1B2E41] bg-[#1B2E41]/5 text-[#1B2E41]' : 'border-stone-200 text-stone-500')}
+              >
+                Sharp (perfect compliance)
+              </button>
+              <button
+                onClick={() => { setRdDesign('fuzzy'); setRdResult(null); }}
+                className={cn("p-2 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition",
+                  rdDesign === 'fuzzy' ? 'border-[#1B2E41] bg-[#1B2E41]/5 text-[#1B2E41]' : 'border-stone-200 text-stone-500')}
+              >
+                Fuzzy (imperfect compliance)
+              </button>
+            </div>
+            <p className="text-[10px] text-stone-400 leading-relaxed">
+              {rdDesign === 'fuzzy'
+                ? 'Fuzzy RD: crossing the cutoff shifts the probability of treatment rather than assigning it deterministically. Estimates a Local Average Treatment Effect (LATE) by instrumenting actual treatment status with the above/below-cutoff indicator (2SLS).'
+                : 'Sharp RD: treatment is a deterministic function of the running variable crossing the cutoff (perfect compliance).'}
+            </p>
+
             <div className="space-y-3">
               <div>
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Outcome variable (Y)</label>
@@ -1216,6 +1314,21 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                   {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
                 </select>
               </div>
+
+              {rdDesign === 'fuzzy' && (
+                <div>
+                  <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Treatment Status (D, actual take-up)</label>
+                  <select
+                    value={rdTreatment}
+                    onChange={(e) => setRdTreatment(e.target.value)}
+                    className="w-full bg-stone-50 border border-stone-200 rounded-lg p-2.5 text-xs font-bold text-stone-800"
+                  >
+                    <option value="">Select variable...</option>
+                    {numericVars.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                  </select>
+                  <p className="text-[10px] text-stone-400 mt-1">The observed compliance/take-up indicator — separate from the running variable's cutoff crossing.</p>
+                </div>
+              )}
 
               <div>
                 <label className="text-[10px] font-bold text-stone-500 uppercase tracking-widest block mb-1">Cutoff Boundary (c)</label>
@@ -1260,7 +1373,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
             <div className="flex flex-col gap-2">
               <button
                 onClick={handleRunRD}
-                disabled={!rdOutcome || !rdRunning || !rdBandwidth || isEstimating}
+                disabled={!rdOutcome || !rdRunning || !rdBandwidth || isEstimating || (rdDesign === 'fuzzy' && !rdTreatment)}
                 className="w-full py-2.5 bg-[#1B2E41] hover:bg-[#243D54] disabled:bg-stone-300 text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-colors flex items-center justify-center gap-2"
               >
                 {isEstimating ? (
@@ -1295,10 +1408,12 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
               </div>
             ) : rdResult.engine === 'python' ? (
               <div className="space-y-6 animate-in fade-in duration-500">
-                <span className="inline-block text-[9px] font-mono font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5">Python / rdrobust (research-grade)</span>
+                <span className="inline-block text-[9px] font-mono font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-0.5">
+                  Python / rdrobust (research-grade) — {rdResult.design === 'fuzzy' ? 'Fuzzy RDD' : 'Sharp RDD'}
+                </span>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
-                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">RD Effect (coef)</span>
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">{rdResult.design === 'fuzzy' ? 'LATE (fuzzy coef)' : 'RD Effect (coef)'}</span>
                     <span className="text-xl font-serif font-bold text-[#1B2E41]">{fmt(rdResult.rdEstimate)}</span>
                   </div>
                   <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
@@ -1310,12 +1425,85 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                     <span className="text-xl font-serif text-stone-800">{fmt(rdResult.bandwidth)}</span>
                   </div>
                 </div>
+                {rdResult.design === 'fuzzy' && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">First-Stage Jump (compliance)</span>
+                      <span className="text-xl font-serif font-bold text-stone-800">{fmt(rdResult.firstStageCoef)}</span>
+                    </div>
+                    <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">First-Stage Robust SE</span>
+                      <span className="text-xl font-serif text-stone-800">{fmt(rdResult.firstStageSE)}</span>
+                    </div>
+                    <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">First-Stage Robust p-value</span>
+                      <span className="text-xl font-serif text-stone-800">{fmtP(rdResult.firstStageP)}</span>
+                    </div>
+                  </div>
+                )}
                 <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-2">
                   <h4 className="text-xs font-bold text-stone-800 uppercase tracking-wider flex items-center gap-2">
                     <HelpCircle className="w-4 h-4 text-stone-600" /> rdrobust estimate
                   </h4>
                   <p className="text-xs text-stone-600 leading-relaxed font-serif">
-                    Local-linear RD with MSE-optimal bandwidth and robust, bias-corrected inference — the same algorithm as R's <span className="font-mono">rdrobust</span>. Robust SE = {fmt(rdResult.rdSE)}, 95% CI = [{fmt(rdResult.ciLow)}, {fmt(rdResult.ciHigh)}], N used = {rdResult.nUsed}.
+                    {rdResult.design === 'fuzzy'
+                      ? <>Local-linear Fuzzy RD with MSE-optimal bandwidth and robust, bias-corrected Wald-ratio inference — the same algorithm as R's <span className="font-mono">rdrobust</span>'s <span className="font-mono">fuzzy=</span> argument. The LATE scales the reduced-form outcome jump by the first-stage jump in treatment take-up.</>
+                      : <>Local-linear RD with MSE-optimal bandwidth and robust, bias-corrected inference — the same algorithm as R's <span className="font-mono">rdrobust</span>.</>}
+                    {' '}Robust SE = {fmt(rdResult.rdSE)}, 95% CI = [{fmt(rdResult.ciLow)}, {fmt(rdResult.ciHigh)}], N used = {rdResult.nUsed}.
+                  </p>
+                </div>
+              </div>
+            ) : rdResult.design === 'fuzzy' ? (
+              <div className="space-y-6 animate-in fade-in duration-500">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">LATE (2SLS)</span>
+                    <span className="text-xl font-serif font-bold text-[#1B2E41]">{fmt(rdResult.rdEstimate)}</span>
+                  </div>
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">RD p-value</span>
+                    <span className="text-xl font-serif font-bold text-stone-800">{fmtP(rdResult.rdP)}</span>
+                  </div>
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Observations in h</span>
+                    <span className="text-xl font-serif text-stone-800">{rdResult.fuzzy?.includedObs}</span>
+                  </div>
+                </div>
+
+                <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-3">
+                  <h4 className="text-xs font-bold text-stone-800 uppercase tracking-wider flex items-center gap-2">
+                    <Target className="w-4 h-4 text-stone-600" />
+                    First-Stage Compliance Jump
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Jump in Treatment Probability</span>
+                      <span className="text-lg font-serif font-bold text-[#1B2E41]">{fmt(rdResult.fuzzy?.firstStageJump)}</span>
+                    </div>
+                    <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Std Error</span>
+                      <span className="text-lg font-serif text-stone-800">{fmt(rdResult.fuzzy?.firstStageSE)}</span>
+                    </div>
+                    <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">p-value</span>
+                      <span className="text-lg font-serif text-stone-800">{fmtP(rdResult.fuzzy?.firstStagePValue)}</span>
+                    </div>
+                    <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-mono tracking-widest text-stone-400 block">Bandwidth ({rdResult.fuzzy?.bandwidthSelector})</span>
+                      <span className="text-lg font-serif text-stone-800">{fmt(rdResult.fuzzy?.bandwidth)}</span>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-stone-400 leading-normal italic">{rdResult.fuzzy?.methodNote}</p>
+                </div>
+
+                {/* Interpretation */}
+                <div className="p-5 bg-white border border-stone-200 rounded-2xl space-y-3">
+                  <h4 className="text-xs font-bold text-stone-800 uppercase tracking-wider flex items-center gap-2">
+                    <HelpCircle className="w-4 h-4 text-stone-600" />
+                    Econometric interpretation
+                  </h4>
+                  <p className="text-xs text-stone-600 leading-relaxed font-serif">
+                    Crossing the cutoff <span className="font-mono">{rdResult.cutoff}</span> in <strong className="text-stone-800">{rdResult.rdRunning}</strong> shifts the probability of receiving <strong className="text-stone-800">{rdResult.rdTreatment}</strong> rather than assigning it deterministically. Instrumenting actual treatment status with the above/below-cutoff indicator (local 2SLS, bandwidth <span className="font-mono">{fmt(rdResult.bandwidth)}</span>) yields a Local Average Treatment Effect on <strong className="text-stone-800">{rdOutcome}</strong> of <strong>{fmt(rdResult.rdEstimate)}</strong> (SE = {fmt(rdResult.rdSE)}), t-stat {fmt(rdResult.rdT)} ({stars(rdResult.rdP) || 'not statistically significant'}).
                   </p>
                 </div>
               </div>

@@ -1154,6 +1154,65 @@ def run_rdd(req: RDDRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
 
+class FuzzyRDDRequest(BaseModel):
+    y: List[float]
+    x: List[float]
+    treatment: List[float]
+    cutoff: float = 0.0
+
+@app.post("/python/rdd-fuzzy")
+def run_rdd_fuzzy(req: FuzzyRDDRequest):
+    """Fuzzy RDD via `rdrobust`'s `fuzzy=` argument (MSE-optimal bandwidth +
+    bias correction), matching R's rdrobust. `treatment` is the actual
+    (possibly imperfect) treatment-status indicator, distinct from the
+    above/below-cutoff indicator implied by `x` vs `cutoff` -- rdrobust uses
+    it to scale the reduced-form jump in the outcome by the first-stage jump
+    in treatment take-up, i.e. a local Wald/IV estimate."""
+    try:
+        import numpy as np
+        from rdrobust import rdrobust
+        y = np.asarray(req.y, dtype=float)
+        x = np.asarray(req.x, dtype=float)
+        t = np.asarray(req.treatment, dtype=float)
+        mask = np.isfinite(y) & np.isfinite(x) & np.isfinite(t)
+        y, x, t = y[mask], x[mask], t[mask]
+        if len(y) < 20:
+            raise HTTPException(status_code=422, detail="Need at least 20 complete observations for rdrobust.")
+        out = rdrobust(y=y, x=x, c=req.cutoff, fuzzy=t)
+
+        # rdrobust returns coef/se/pv/ci as DataFrames indexed by
+        # ['Conventional','Bias-Corrected','Robust']; surface the Robust row.
+        def cell(df, row_label, col=0):
+            try:
+                return safe_float(df.loc[row_label].iloc[col])
+            except Exception:
+                try:
+                    return safe_float(df.iloc[-1, col])
+                except Exception:
+                    return None
+
+        return {
+            "coef": cell(out.coef, "Conventional"),
+            "seRobust": cell(out.se, "Robust"),
+            "pValueRobust": cell(out.pv, "Robust"),
+            "ciLow": cell(out.ci, "Robust", 0),
+            "ciHigh": cell(out.ci, "Robust", 1),
+            "bandwidth": safe_float(getattr(out, "bws", None).iloc[0, 0]) if getattr(out, "bws", None) is not None else None,
+            # First-stage (treatment take-up jump at the cutoff) and reduced-form
+            # (outcome jump at the cutoff) components rdrobust reports for the
+            # fuzzy case; the fuzzy coefficient above is reduced-form / first-stage.
+            "firstStageCoef": cell(out.tau_T, "Conventional") if hasattr(out, "tau_T") else None,
+            "firstStageSERobust": cell(out.se_T, "Robust") if hasattr(out, "se_T") else None,
+            "firstStagePValueRobust": cell(out.pv_T, "Robust") if hasattr(out, "pv_T") else None,
+            "cutoff": req.cutoff,
+            "nUsed": int(len(y)),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 class PowerRequest(BaseModel):
     design: str = "ttest"           # 'ttest' | 'cluster-main' | 'cluster-interaction'
     solveFor: str = "n"             # 'n' | 'power' | 'mdes' (ttest only)

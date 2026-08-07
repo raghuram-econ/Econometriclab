@@ -195,6 +195,16 @@ export async function runRDDPy(payload: {
   return callBackendAPI('/api/python/rdd', payload);
 }
 
+// Fuzzy RDD (imperfect compliance) via `rdrobust`'s `fuzzy=` argument.
+export async function runFuzzyRDDPy(payload: {
+  y: number[];
+  x: number[];
+  treatment: number[];
+  cutoff?: number;
+}): Promise<any> {
+  return callBackendAPI('/api/python/rdd-fuzzy', payload);
+}
+
 // Research-grade power analysis: statsmodels (matches R pwr) for standard
 // designs, closed-form / Monte-Carlo simulation for cluster-randomized designs.
 // Synthetic Control Method (Abadie-Diamond-Hainmueller) via `pysyncon`,
