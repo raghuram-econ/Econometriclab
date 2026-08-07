@@ -1,35 +1,100 @@
+/**
+ * @jest-environment node
+ *
+ * This file makes live network calls to OpenRouter and touches no DOM, so it
+ * belongs in Jest's plain Node environment rather than the project's default
+ * jsdom one. Node has native fetch/Headers/Request/Response/TextEncoder/
+ * TextDecoder built in -- jsdom provides none of them (confirmed: fetch and
+ * TextEncoder are both `undefined` under jsdom here), and every attempt to
+ * polyfill them for jsdom via undici hit further missing Web API globals
+ * (ReadableStream, etc.) undici's own implementation needs. No polyfilling
+ * needed at all once this file runs under `node` instead.
+ */
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
-import { GoogleGenAI, Type } from '@google/genai';
 import * as dotenv from 'dotenv';
-import fetch, { Headers, Request, Response } from 'node-fetch';
-import { TextDecoder, TextEncoder } from 'util';
 
 dotenv.config();
 
-// Polyfill fetch for Jest environment
-// @ts-ignore
-globalThis.fetch = fetch;
-// @ts-ignore
-globalThis.Headers = Headers;
-// @ts-ignore
-globalThis.Request = Request;
-// @ts-ignore
-globalThis.Response = Response;
-// @ts-ignore
-globalThis.TextDecoder = TextDecoder;
-// @ts-ignore
-globalThis.TextEncoder = TextEncoder;
+// __filename/__dirname are already provided by Jest's CommonJS module wrapper;
+// redeclaring them (e.g. via import.meta.url, the ESM-only equivalent) collides
+// with those built-ins and fails the whole file to load with a SyntaxError.
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Live-tests the same OpenRouter/DeepSeek path server.ts actually uses in
+// production (not the direct Gemini SDK this originally called, from before
+// the Gemini -> OpenRouter migration -- GEMINI_API_KEY is unused now, so
+// that version of this file could never run).
+const hasApiKey = !!process.env.OPENROUTER_API_KEY;
 
-const hasApiKey = !!process.env.GEMINI_API_KEY;
+// Only used here as labeled string constants for building a JSON-shape
+// description in the prompt (see schemaToSkeleton below) -- not the real
+// @google/genai SDK type, which no longer needs to be imported at all now
+// that this file calls OpenRouter directly. Importing it just for these
+// enum values pulls in @google/genai's ESM-only web build, which Jest's
+// CommonJS transform can't parse.
+const Type = {
+  STRING: "STRING",
+  NUMBER: "NUMBER",
+  INTEGER: "INTEGER",
+  BOOLEAN: "BOOLEAN",
+  ARRAY: "ARRAY",
+  OBJECT: "OBJECT",
+} as const;
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || "DUMMY_KEY",
-});
+// Mirrors schemaToSkeleton/geminiSchemaToPromptText in server.ts: DeepSeek
+// has no native schema-validated output, only response_format: json_object
+// (valid JSON syntax, not a guaranteed shape), so the required shape is
+// described in the system prompt instead.
+function schemaToSkeleton(schema: any): any {
+  if (!schema) return null;
+  if (schema.enum) return schema.enum[0];
+  if (schema.type === Type.OBJECT) {
+    const obj: any = {};
+    Object.entries(schema.properties || {}).forEach(([key, propSchema]) => {
+      obj[key] = schemaToSkeleton(propSchema);
+    });
+    return obj;
+  }
+  if (schema.type === Type.ARRAY) return [schemaToSkeleton(schema.items)];
+  if (schema.type === Type.INTEGER || schema.type === Type.NUMBER) return 0;
+  if (schema.type === Type.BOOLEAN) return true;
+  return "string";
+}
+
+function schemaToPromptText(schema: any): string {
+  return `Respond with a single JSON object matching exactly this shape (no markdown code fences, no extra commentary -- JSON only):\n${JSON.stringify(schemaToSkeleton(schema), null, 2)}`;
+}
+
+async function callOpenRouter(systemInstruction: string, prompt: string, responseSchema: any) {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      "HTTP-Referer": process.env.PUBLIC_APP_URL || "https://econometrics-lab.onrender.com",
+      "X-Title": "Econometrics Lab",
+    },
+    body: JSON.stringify({
+      model: process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4-pro",
+      messages: [
+        { role: "system", content: `${systemInstruction}\n\n${schemaToPromptText(responseSchema)}` },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.1,
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    const err: any = new Error(`OpenRouter API error (${response.status}): ${errText}`);
+    err.status = response.status;
+    throw err;
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || "";
+}
 
 // Load fixtures
 const fixturesPath = path.join(__dirname, 'fixtures/interpreter-fixtures.json');
@@ -285,18 +350,8 @@ CORE RULES:
     ${rawOutput}
   `;
 
-  const result = await ai.models.generateContent({
-    model: "gemini-3.5-flash",
-    contents: prompt,
-    config: {
-      systemInstruction,
-      temperature: 0.1,
-      responseMimeType: "application/json",
-      responseSchema
-    }
-  });
-
-  return JSON.parse(result.text!.trim());
+  const text = await callOpenRouter(systemInstruction, prompt, responseSchema);
+  return JSON.parse(text.trim());
 }
 
 function extractDecimals(obj: any): string[] {
@@ -494,6 +549,6 @@ describe("Stats Interpreter Fidelity Tests (Live Gemini)", () => {
         expect(parseFloat(response.ttestResults.mean_x)).toBeCloseTo(fixture.truth.mean_x, 5);
         expect(parseFloat(response.ttestResults.mean_y)).toBeCloseTo(fixture.truth.mean_y, 5);
       }
-    }, 30000); // 30s timeout for live API calls
+    }, 60000); // 60s timeout for live API calls -- DeepSeek via OpenRouter runs close to 30s on this prompt's size, unlike the faster gemini-3.5-flash this originally targeted
   });
 });
