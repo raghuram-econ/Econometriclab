@@ -90,6 +90,8 @@ ${JSON.stringify(robustnessItems, null, 2)}
 
 CRITICAL RULE: If a statistic is not present in the MODEL RUNS (RESULTS JSON), return null and never invent a value. Cite only numbers present in the provided output.
 
+CRITICAL RULE ON STANDARD ERROR METHODOLOGY: Each model run's \`results.seType\` field states the ACTUAL standard error method used (e.g. "Clustered SE", "Robust SE (HC1)", "Classical SE", "Bootstrap SE") -- this is ground truth. When describing standard errors in Methodology or Results, use that exact method. Do NOT default to calling standard errors "HC1", "heteroskedasticity-robust", or any other label unless \`results.seType\` literally says so. If \`results.clusterVar\` is set, standard errors are clustered at that variable's level (with \`results.numClusters\` clusters) -- describe them as clustered, never as plain heteroskedasticity-robust (HC0-HC3) SEs, which are a distinct, non-clustered method.
+
 Write a complete research report with ALL of the following sections. This must read like a real academic paper, not a summary. Use plain professional English — no jargon without explanation.
 
 ---
