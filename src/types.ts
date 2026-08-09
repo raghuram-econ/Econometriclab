@@ -135,6 +135,7 @@ export interface ModelHistoryItem {
 export type ModuleTab = 
   | 'dashboard'
   | 'professor-desk'
+  | 'lab-partner'
   | 'academic-lab'
   | 'stats-interpreter'
   | 'teacher-mode'

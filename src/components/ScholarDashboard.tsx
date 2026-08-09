@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  GraduationCap, 
-  Sparkles, 
-  PenTool, 
-  Zap, 
-  Clock, 
+import {
+  GraduationCap,
+  Sparkles,
+  PenTool,
+  Zap,
+  Clock,
   ChevronRight,
   TrendingUp,
   BookOpen,
@@ -13,7 +13,8 @@ import {
   Loader2,
   RefreshCw,
   Compass,
-  Bookmark
+  Bookmark,
+  Bot
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -185,6 +186,14 @@ export default function ScholarDashboard({ onNavigate }: ScholarDashboardProps) 
       icon: PenTool,
       color: 'bg-rose-50 text-rose-700 border-rose-100',
       iconBg: 'bg-rose-100'
+    },
+    {
+      id: 'lab-partner',
+      title: 'Lab Partner',
+      description: 'Ask about your current dataset and analysis history, and spot potential issues in your results.',
+      icon: Bot,
+      color: 'bg-indigo-50 text-indigo-700 border-indigo-100',
+      iconBg: 'bg-indigo-100'
     }
   ];
 

@@ -21,6 +21,7 @@ const ScholarDashboard = React.lazy(() => import('./components/ScholarDashboard'
 const ResearchDesk = React.lazy(() => import('./components/ResearchDesk'));
 const AcademicLab = React.lazy(() => import('./components/modules/AcademicLab'));
 const ProfessorDesk = React.lazy(() => import('./components/modules/ProfessorDesk'));
+const LabPartner = React.lazy(() => import('./components/modules/LabPartner'));
 const StatsInterpreterLab = React.lazy(() => import('./components/modules/StatsInterpreterLab'));
 const TeacherMode = React.lazy(() => import('./components/modules/TeacherMode'));
 const AboutResearch = React.lazy(() => import('./components/modules/AboutResearch'));
@@ -681,6 +682,7 @@ export default function App() {
     'professor-desk': () => (
       <ProfessorDesk initialQuestion={dashboardSharedQuestion} initialMode={dashboardSharedMode} onClearInitialQuestion={() => setDashboardSharedQuestion('')} />
     ),
+    'lab-partner': () => <LabPartner />,
     'academic-lab': () => (
       <AcademicLab initialQuestion={dashboardSharedQuestion} onClearInitialQuestion={() => setDashboardSharedQuestion('')} />
     ),

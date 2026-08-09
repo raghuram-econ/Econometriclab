@@ -1,6 +1,7 @@
 export const NAV_TABS = {
   DASHBOARD: 'dashboard',
   PROFESSOR_DESK: 'professor-desk',
+  LAB_PARTNER: 'lab-partner',
   STATS_INTERPRETER: 'stats-interpreter',
   TEACHER_MODE: 'teacher-mode',
   TEMPLATES: 'templates',

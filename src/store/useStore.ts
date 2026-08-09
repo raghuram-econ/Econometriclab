@@ -5,6 +5,7 @@ import { subscribeToAuth } from '../services/authService';
 import { User } from 'firebase/auth';
 import { debounce } from 'lodash';
 import { getSampleData } from '../services/dataService';
+import { applyVariableTransform } from '../lib/variableTransforms';
 
 export interface RobustnessItem {
   id: string;
@@ -65,6 +66,11 @@ export interface Message {
   text: string;
 }
 
+export interface LabPartnerMessage {
+  role: 'user' | 'assistant';
+  text: string;
+}
+
 export interface TeacherModeStateData {
   questionPrompt: string;
   studentAnswer: string;
@@ -97,6 +103,7 @@ interface GlobalState {
     yIsLogged: boolean;
   };
   professorDeskMessages: Message[];
+  labPartnerMessages: LabPartnerMessage[];
   academicLabState: AcademicLabStateData;
   teacherModeState: TeacherModeStateData;
   entityId: string;
@@ -112,6 +119,7 @@ interface GlobalState {
   currentPlan: 'Scholar Free' | 'Researcher Pro' | 'Institutional';
   uiDensity: UIDensity;
   savedDatasets: Dataset[];
+  pendingOlsFix: { forceRobust: boolean } | null;
 }
 
 const initialAiEnabled = (() => {
@@ -198,6 +206,12 @@ let state: GlobalState = {
       text: "Greetings. I am your academic advisor in applied, theoretical, and empirical economics. I specialize across all 10 divisions of the MA, UGC-NET, and CUET PG curriculum.\n\nHow can I help you think like an applied economist today? Please present any conceptual query, specific proof, or policy analysis."
     }
   ],
+  labPartnerMessages: savedState.labPartnerMessages || [
+    {
+      role: 'assistant',
+      text: "Hi! I'm your Lab Partner. I can see your current dataset and every analysis you've run this session, and I can help you review findings or spot potential issues in your results.\n\nWhat would you like to explore?"
+    }
+  ],
   academicLabState: savedState.academicLabState || {
     topicOrUnit: '',
     mode: 'Topic Overview',
@@ -223,6 +237,7 @@ let state: GlobalState = {
   uiDensity: savedState.uiDensity || 'spacious',
   toasts: [],
   savedDatasets: loadSavedDatasets(),
+  pendingOlsFix: null,
 };
 
 const listeners = new Set<(s: GlobalState) => void>();
@@ -611,6 +626,56 @@ export function useStore() {
       state.professorDeskMessages = messages;
       notify();
       saveAutosaveField('professorDeskMessages', messages);
+    },
+    setLabPartnerMessages: (messages: LabPartnerMessage[]) => {
+      state.labPartnerMessages = messages;
+      notify();
+      saveAutosaveField('labPartnerMessages', messages);
+    },
+    setPendingOlsFix: (fix: { forceRobust: boolean } | null) => {
+      state.pendingOlsFix = fix;
+      notify();
+    },
+    applyOlsFix: (params: { yVar: string; xVars: string[]; logTransform?: boolean }) => {
+      let resolvedYVar = params.yVar;
+
+      if (params.logTransform && state.currentDataset) {
+        const logName = `ln_${params.yVar}`;
+        const alreadyExists = (state.currentDataset.variables || []).some(v => v.name === logName);
+
+        if (!alreadyExists) {
+          const newData = (state.currentDataset.data || []).map(row => ({
+            ...row,
+            [logName]: applyVariableTransform(row[params.yVar], 'ln'),
+          }));
+          const newVariable = {
+            name: logName,
+            label: logName,
+            type: 'numeric' as const,
+            isTransformed: true,
+            description: `Natural log of ${params.yVar}`,
+          };
+          state.currentDataset = {
+            ...state.currentDataset,
+            data: newData,
+            variables: [...(state.currentDataset.variables || []), newVariable],
+            colCount: state.currentDataset.colCount + 1,
+          };
+        }
+
+        resolvedYVar = logName;
+      }
+
+      state.dependentVar = resolvedYVar;
+      state.regressors = params.xVars;
+      state.pendingOlsFix = { forceRobust: true };
+      state.activeModule = 'ols';
+
+      saveAutosaveField('dependentVar', resolvedYVar);
+      saveAutosaveField('regressors', params.xVars);
+      saveAutosaveField('activeModule', 'ols');
+
+      notify();
     },
     setAcademicLabState: (labState: Partial<AcademicLabStateData>) => {
       state.academicLabState = { ...state.academicLabState, ...labState };

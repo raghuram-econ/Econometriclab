@@ -66,13 +66,16 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
   }, []);
 
   const [dataset, setDataset] = useState<any | null>(globalDataset);
-  const { 
-    dependentVar, 
-    setDependentVar, 
-    regressors: independentVars, 
+  const {
+    dependentVar,
+    setDependentVar,
+    regressors: independentVars,
     setRegressors: setIndependentVars,
-    addToast
+    addToast,
+    pendingOlsFix,
+    setPendingOlsFix
   } = useStore();
+  const lastDatasetNameRef = useRef<string | undefined>(globalDataset?.name);
   const { addToReport } = useSessionReport();
   const [seEstimator, setSeEstimator] = useState<'None' | 'HC0' | 'HC1' | 'HC2' | 'HC3' | 'Cluster'>('HC1');
   const [clusterVar, setClusterVar] = useState<string>('');
@@ -129,13 +132,33 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
   useEffect(() => {
     if (globalDataset) {
       setDataset(globalDataset);
-      // FIX: reset committed model spec when a new dataset loads so stale variables do not persist
-      setDependentVar('');
-      setIndependentVars([]);
-      setEstimationResults(null);
-      setEstimationError(null);
+      // FIX: only reset the committed model spec when the dataset actually changes
+      // (by name) -- not on every new object reference. A fix action (e.g. adding a
+      // derived ln_<var> column) produces a new reference for the *same* dataset and
+      // must not wipe the y/x selection it just set.
+      if (globalDataset.name !== lastDatasetNameRef.current) {
+        setDependentVar('');
+        setIndependentVars([]);
+        setEstimationResults(null);
+        setEstimationError(null);
+      }
+      lastDatasetNameRef.current = globalDataset.name;
     }
   }, [globalDataset]);
+
+  // Consume a pending auto-fix (from Lab Partner): force robust SE if requested,
+  // then re-run once dependentVar/independentVars/seEstimator are all in sync.
+  useEffect(() => {
+    if (!pendingOlsFix || !dataset || !dependentVar || (independentVars || []).length === 0) return;
+    if (pendingOlsFix.forceRobust && seEstimator === 'None') {
+      setSeEstimator('HC1');
+      return; // wait for the re-render with the updated seEstimator before running
+    }
+    executeRegression();
+    setPendingOlsFix(null);
+    addToast('success', 'Fix Applied', 'Re-ran the model with the requested adjustment.');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingOlsFix, dataset, dependentVar, independentVars, seEstimator]);
 
   const handleToggleIndependent = (variable: string) => {
     if ((independentVars || []).includes(variable)) {
