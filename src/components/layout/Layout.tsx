@@ -24,7 +24,8 @@ import {
   Upload,
   Tags,
   Keyboard,
-  Compass
+  Compass,
+  MessageCircle
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { cn } from '../../lib/utils';
@@ -207,6 +208,7 @@ export default function Layout({ children, activeTab, onTabChange, aiPanel, onCl
       items: [
         { id: NAV_TABS.DASHBOARD, label: '🏠 Dashboard', icon: History },
         { id: NAV_TABS.PROFESSOR_DESK, label: 'Professor Desk', icon: GraduationCap },
+        { id: NAV_TABS.LAB_PARTNER, label: 'Lab Partner', icon: MessageCircle },
         { id: NAV_TABS.STATS_INTERPRETER, label: 'R & SPSS Interpreter', icon: BarChart3 },
         { id: NAV_TABS.TEACHER_MODE, label: 'Essay Coach (Teacher Mode)', icon: BrainCircuit },
       ]
