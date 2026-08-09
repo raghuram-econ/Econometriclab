@@ -1559,6 +1559,9 @@ You must return a JSON response matching the following schema:
 }
 
 CORE RULES:
+- Each model entry in SESSION HISTORY OF ESTIMATED MODELS already reports the ACTUAL "robust" and "clusterVar"/"numClusters" values used for standard errors. These are ground truth — read them before writing any claim about inference/standard-error methodology, and never assume a default (e.g. do not assume classical, heteroskedasticity-robust, or state-level clustering) that isn't literally in that JSON.
+- If a model shows clusterVar set and numClusters >= 30, clustering is methodologically adequate on the cluster-count dimension — do not raise a "too few clusters" or "wrong clustering level" objection for that model unless RULE-BASED METHODOLOGICAL VIOLATIONS SEEDED FROM RUNTIME explicitly flagged it.
+- Only report a standard-error/clustering objection when it is either (a) explicitly listed in RULE-BASED METHODOLOGICAL VIOLATIONS SEEDED FROM RUNTIME, or (b) directly and verifiably contradicted by the robust/clusterVar/numClusters fields you were given. Never invent or assume unstated inference methodology.
 - If a statistic is not present in the SESSION HISTORY OF ESTIMATED MODELS, return null and never invent a value.
 - Ensure all suggestions link to real actions or tools available in the Economics Learning Lab. Stay in character: demanding, precise, and deeply knowledgeable about identification and causal inference. No LaTeX math inside JSON.`;
 
@@ -1572,8 +1575,18 @@ ${JSON.stringify(history.map((h: any) => ({
   n: h.results?.n,
   robust: h.results?.robust,
   clusterVar: h.results?.clusterVar,
+  numClusters: h.results?.numClusters,
   diagnostics: h.results?.diagnostics
 })))}
+
+ACTUAL INFERENCE METHODOLOGY USED PER MODEL (ground truth — do not contradict this):
+${history.map((h: any, i: number) => {
+  const r = h.results || {};
+  const seMethod = r.clusterVar
+    ? `clustered by '${r.clusterVar}' (${r.numClusters ?? 'unknown #'} clusters)`
+    : (r.robust ? "heteroskedasticity-robust (no clustering)" : "classical/non-robust");
+  return `${i+1}. ${h.specification || h.module}: standard errors are ${seMethod}.`;
+}).join("\n")}
 
 RULE-BASED METHODOLOGICAL VIOLATIONS SEEDED FROM RUNTIME:
 ${ruleViolations.map((v, i) => `${i+1}. ${v}`).join("\n")}
