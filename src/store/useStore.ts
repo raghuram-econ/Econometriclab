@@ -270,12 +270,18 @@ const debouncedSave = debounce(async () => {
 // onAuthStateChanged can fire more than once per session (token refresh,
 // network reconnect, etc.), and each firing used to re-run the full
 // workspace hydration below -- including overwriting `activeModule` with
-// whatever was last saved. If that resolved (or a Firestore-offline retry
-// resolved) after the user had already navigated locally, it would silently
-// snap the screen back to the old module a moment later. Hydrate the
-// workspace from storage only once per session; later auth events just
-// update `state.user`.
+// whatever was last saved. Worse, even a single hydration call is slow
+// (several sequential awaits against IndexedDB and Firestore, the latter
+// observed timing out and retrying against an offline Firestore client): if
+// the user clicks a nav item while that first call is still in flight, it
+// resolves afterward and clobbers the click regardless of how many times
+// the callback itself has fired. So two guards are needed together:
+// `hasHydratedWorkspaceOnce` skips re-running hydration on later auth
+// events, and `userHasNavigated` (set by setActiveModule) stops the
+// in-flight hydration from overwriting activeModule once the user has
+// interacted, no matter when the pending reads resolve.
 let hasHydratedWorkspaceOnce = false;
+let userHasNavigated = false;
 
 // Initialize Auth
 subscribeToAuth(async (user) => {
@@ -291,7 +297,7 @@ subscribeToAuth(async (user) => {
   try {
     const cachedActiveModule = await persistenceService.getFromIndexedDB('activeModule');
     const cachedResearchQuestion = await persistenceService.getFromIndexedDB('researchQuestion');
-    if (cachedActiveModule) {
+    if (cachedActiveModule && !userHasNavigated) {
       state.activeModule = cachedActiveModule;
     }
     if (cachedResearchQuestion) {
@@ -322,7 +328,7 @@ subscribeToAuth(async (user) => {
           dependentVar: saved.dependentVar !== undefined ? saved.dependentVar : (workspace.dependentVar || state.dependentVar),
           regressors: saved.regressors !== undefined ? saved.regressors : (workspace.regressors || state.regressors),
           modelType: saved.modelType !== undefined ? saved.modelType : (workspace.modelType || state.modelType),
-          activeModule: saved.activeModule || workspace.activeModule || state.activeModule,
+          activeModule: userHasNavigated ? state.activeModule : (saved.activeModule || workspace.activeModule || state.activeModule),
           uiDensity: saved.uiDensity || state.uiDensity,
           isHydrated: true,
         };
@@ -335,7 +341,7 @@ subscribeToAuth(async (user) => {
           dependentVar: saved.dependentVar !== undefined ? saved.dependentVar : state.dependentVar,
           regressors: saved.regressors !== undefined ? saved.regressors : state.regressors,
           modelType: saved.modelType !== undefined ? saved.modelType : state.modelType,
-          activeModule: saved.activeModule || state.activeModule,
+          activeModule: userHasNavigated ? state.activeModule : (saved.activeModule || state.activeModule),
           uiDensity: saved.uiDensity || state.uiDensity,
           isHydrated: true,
         };
@@ -421,6 +427,7 @@ export function useStore() {
     },
     setActiveModule: (tab: ModuleTab) => {
       if (state.activeModule === tab) return;
+      userHasNavigated = true;
       state.activeModule = tab;
       notify();
       debouncedSave();
