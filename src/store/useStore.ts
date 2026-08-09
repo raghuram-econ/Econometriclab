@@ -267,10 +267,26 @@ const debouncedSave = debounce(async () => {
   }, 2000);
 }, 2000);
 
+// onAuthStateChanged can fire more than once per session (token refresh,
+// network reconnect, etc.), and each firing used to re-run the full
+// workspace hydration below -- including overwriting `activeModule` with
+// whatever was last saved. If that resolved (or a Firestore-offline retry
+// resolved) after the user had already navigated locally, it would silently
+// snap the screen back to the old module a moment later. Hydrate the
+// workspace from storage only once per session; later auth events just
+// update `state.user`.
+let hasHydratedWorkspaceOnce = false;
+
 // Initialize Auth
 subscribeToAuth(async (user) => {
   state.user = user;
-  
+
+  if (hasHydratedWorkspaceOnce) {
+    notify();
+    return;
+  }
+  hasHydratedWorkspaceOnce = true;
+
   // Load session from IndexedDB first as a fallback/offline-first experience
   try {
     const cachedActiveModule = await persistenceService.getFromIndexedDB('activeModule');
