@@ -1260,6 +1260,10 @@ EXAM TARGET: ${level}`;
       const { moduleName, specification, results, researchContext } = req.body;
       const ai = getGeminiClient();
 
+      const actualSeMethod = results?.clusterVar
+        ? `clustered by '${results.clusterVar}' (${results?.numClusters ?? 'unknown #'} clusters)`
+        : (results?.robust ? `heteroskedasticity-robust (${results?.robustType || 'HC1'}), NOT clustered` : (results?.seType || 'classical/non-robust'));
+
       const systemInstruction = `You are an expert econometrician and statistician. Your task is to interpret a regression or statistical model run and provide two different levels of analysis (Beginner/Wooldridge-style and Advanced/Referee-style) as a structured JSON object.
 
 CRITICAL FORMATTING AND CONTENT RULES:
@@ -1269,12 +1273,14 @@ CRITICAL FORMATTING AND CONTENT RULES:
 4. Keep the tone for Beginner: respectful, clear, pedagogical, like Wooldridge's Chapter 2 textbook explanations. Avoid condescending language or childish analogies.
 5. Keep the tone for Advanced: terse, technical, direct, like an academic journal referee report or a dissertation supervisor's marginal comments.
 6. The "interpretationCautions" paragraph in the beginner section MUST end with an explicit, plain language epistemic-boundary statement explaining exactly what the estimate can NOT claim (specifically warning about potential selection bias, omitted variables, and stating clearly that no causal identification is possible unless a specific experimental or quasi-experimental design is explicitly provided in the research context).
-7. All JSON output must strictly match the schema.`;
+7. All JSON output must strictly match the schema.
+8. The standard error methodology actually used is stated below as ACTUAL SE METHOD -- this is ground truth from the results JSON (results.seType/robust/clusterVar/numClusters). When describing inference/standard errors anywhere in either review, you MUST match this exactly (e.g. do not call a clustered run "HC1" or "heteroskedasticity-robust", and do not call a plain-robust run "clustered"). Never assume a default SE method that isn't stated here.`;
 
       const prompt = `Here is the econometric model specification and results to interpret:
 MODEL TYPE / MODULE: ${moduleName}
 SPECIFICATION: ${specification}
 RESULTS (JSON): ${JSON.stringify(results, null, 2)}
+ACTUAL SE METHOD (ground truth): ${actualSeMethod}
 RESEARCH CONTEXT: ${researchContext ? JSON.stringify(researchContext) : 'none'}
 
 Please parse these outputs and populate both the beginner and advanced econometric reviews. For the beginner review, write clean explanatory sentences, and construct a clean coefficient table with practical meanings.
@@ -1637,21 +1643,28 @@ Please generate the referee report conforming exactly to the JSON schema.`;
       const { result, type, mode, researchQuestion, format } = req.body;
       const ai = getGeminiClient();
 
+      const actualSeMethod = result?.clusterVar
+        ? `clustered by '${result.clusterVar}' (${result?.numClusters ?? 'unknown #'} clusters)`
+        : (result?.robust ? `heteroskedasticity-robust (${result?.robustType || 'HC1'}), NOT clustered` : (result?.seType || 'classical/non-robust'));
+
       let systemPrompt = `You are an academic economist. Translate raw statistical and econometric indices into structured, rigorous, and highly readable explanations.
-CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical values, coefficient sizes, standard errors, t-statistics, or p-values. You are strictly restricted to the raw model statistics provided in the prompt. If a statistical value is not present in the raw results, do NOT mention it or refer to it. Your explanation must be 100% mathematically and factually faithful to the raw input.`;
-      
+CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical values, coefficient sizes, standard errors, t-statistics, or p-values. You are strictly restricted to the raw model statistics provided in the prompt. If a statistical value is not present in the raw results, do NOT mention it or refer to it. Your explanation must be 100% mathematically and factually faithful to the raw input.
+The ACTUAL SE METHOD given below is ground truth for standard-error/inference methodology -- match it exactly and never default to a different label (e.g. do not call a clustered run "HC1" or vice versa).`;
+
       if (format === 'apa') {
         systemPrompt = `You are an academic economist. Write a results paragraph in strict APA 7th edition format. State the test used, degrees of freedom, statistic value, p-value, and effect size. Use past tense. Do not interpret causal claims unless an experimental design is described. Write in APA 7th edition format. Include: test statistic name, value to 2 decimal places, degrees of freedom in parentheses, exact p-value (or p < .001), and effect size where calculable.
-CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical values, coefficient sizes, standard errors, t-statistics, or p-values. You are strictly restricted to the raw model statistics provided in the prompt. If a statistical value is not present in the raw results, do NOT mention it or refer to it. Your explanation must be 100% mathematically and factually faithful to the raw input.`;
+CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical values, coefficient sizes, standard errors, t-statistics, or p-values. You are strictly restricted to the raw model statistics provided in the prompt. If a statistical value is not present in the raw results, do NOT mention it or refer to it. Your explanation must be 100% mathematically and factually faithful to the raw input.
+The ACTUAL SE METHOD given below is ground truth for standard-error/inference methodology -- match it exactly and never default to a different label (e.g. do not call a clustered run "HC1" or vice versa).`;
       }
 
       const prompt = `
-        Write a rigorous, professional APA-style (American Psychological Association) results paragraph in academic English for an Economics research paper. 
+        Write a rigorous, professional APA-style (American Psychological Association) results paragraph in academic English for an Economics research paper.
         Here are the model statistics and specifications:
         - Framework/Model Type: ${type || 'Econometric Model'}
         - Research Question Context: ${researchQuestion ? JSON.stringify(researchQuestion) : 'none'}
         - User Learning Mode: ${mode || 'student'}
         - Raw Results: ${JSON.stringify(result || {})}
+        - ACTUAL SE METHOD (ground truth): ${actualSeMethod}
 
         Guidelines:
         - Reference specific coefficient sizes, direction of relationship, t/z stats, and p-values in APA style (e.g., b = X, t(df) = Y, p = Z).
@@ -1934,6 +1947,14 @@ CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical valu
         results: h.results
       }));
 
+      const actualSeMethods = modelRuns.map((m: any, i: number) => {
+        const r = m.results || {};
+        const method = r.clusterVar
+          ? `clustered by '${r.clusterVar}' (${r.numClusters ?? 'unknown #'} clusters)`
+          : (r.robust ? `heteroskedasticity-robust (${r.robustType || 'HC1'}), NOT clustered` : (r.seType || 'classical/non-robust'));
+        return `${i + 1}. ${m.specification || m.moduleName}: ${method}.`;
+      }).join("\n");
+
       const basePrompt = generateMetaAnalysisPrompt(modelRuns);
       const prompt = `
         ${basePrompt}
@@ -1941,6 +1962,10 @@ CRITICAL MANDATE: NEVER invent, hallucinate, or extrapolate any statistical valu
         CRITICAL FAITHFULNESS MANDATE:
         NEVER invent, hallucinate, extrapolate, or estimate any statistical indicators, standard errors, R-squared values, sample sizes, or regression coefficients that are missing from the inputs.
         If a statistic (like R-squared, F-stat, or sample size) is not explicitly present in the results of a specific model in the input array, you MUST label it as "N/A" or "Not Reported" in the comparison table. Do NOT fabricate plausible values.
+
+        ACTUAL SE METHODOLOGY PER MODEL (ground truth -- do not contradict this):
+        ${actualSeMethods}
+        When describing standard errors/inference methodology for any model, use exactly the method stated above for it. Never default to calling a clustered run "HC1"/robust, or a plain-robust run "clustered".
 
         TASK:
         Generate the synthesized report and divide it into four sections matching the following JSON schema:
