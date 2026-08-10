@@ -99,6 +99,38 @@ export type AnalysisType =
   | 'Quantile'
   | 'ARIMA';
 
+const ESTIMATOR_LABELS: Record<AnalysisType, string> = {
+  OLS: 'OLS (Linear OLS)',
+  'Robust OLS': 'Robust OLS (White SE)',
+  WLS: 'WLS (Weighted Least Squares)',
+  Logit: 'Logit (Binary MLE)',
+  Probit: 'Probit (Normal MLE)',
+  'Panel FE': 'Panel FE (Within Estimator)',
+  'Panel RE': 'Panel RE (GLS Random Effects)',
+  IV: 'IV/2SLS (Two Stage Least Squares)',
+  DiD: 'DiD (Difference-in-Differences)',
+  ANOVA: 'ANOVA (Analysis of Variance)',
+  't-test': 't-test (Mean Comparison)',
+  'Chi-square': 'Chi-square Test',
+  'Factor Analysis': 'Factor Analysis / PCA',
+  Poisson: 'Poisson Regression',
+  Tobit: 'Tobit (Censored Regression)',
+  'Cox PH': 'Cox Proportional Hazards',
+  Quantile: 'Quantile Regression',
+  ARIMA: 'ARIMA (Time Series Forecast)',
+};
+
+// Estimators most commonly associated with each origin program's real-world usage.
+// Used only to sort/group the Estimator dropdown so relevant options surface first --
+// never to hide an option, since any tool can technically produce most of these with
+// the right package/add-on, and hiding one risks blocking a legitimate paste.
+const COMMON_ESTIMATORS_BY_PROGRAM: Record<string, AnalysisType[]> = {
+  R: ['OLS', 'Robust OLS', 'WLS', 'Logit', 'Probit', 'IV', 'DiD', 't-test', 'Tobit', 'Cox PH', 'Quantile'],
+  SPSS: ['OLS', 'Logit', 'Probit', 'ANOVA', 't-test', 'Chi-square', 'Factor Analysis'],
+  Stata: ['OLS', 'Robust OLS', 'WLS', 'Logit', 'Probit', 'Panel FE', 'Panel RE', 'IV', 'DiD', 'Poisson', 'Tobit', 'Cox PH', 'Quantile'],
+  Python: ['OLS', 'Robust OLS', 'WLS', 'Logit', 'Probit', 'Poisson', 'Tobit', 'Quantile', 'ARIMA'],
+};
+
 export interface StatsTemplate {
   id: string;
   toolType: string;
@@ -887,24 +919,25 @@ function StatsInterpreterLabComponent() {
                       onChange={(e) => setAnalysisType(e.target.value as AnalysisType)}
                       className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white font-medium"
                     >
-                      <option value="OLS">OLS (Linear OLS)</option>
-                      <option value="Robust OLS">Robust OLS (White SE)</option>
-                      <option value="WLS">WLS (Weighted Least Squares)</option>
-                      <option value="Logit">Logit (Binary MLE)</option>
-                      <option value="Probit">Probit (Normal MLE)</option>
-                      <option value="Panel FE">Panel FE (Within Estimator)</option>
-                      <option value="Panel RE">Panel RE (GLS Random Effects)</option>
-                      <option value="IV">IV/2SLS (Two Stage Least Squares)</option>
-                      <option value="DiD">DiD (Difference-in-Differences)</option>
-                      <option value="ANOVA">ANOVA (Analysis of Variance)</option>
-                      <option value="t-test">t-test (Mean Comparison)</option>
-                      <option value="Chi-square">Chi-square Test</option>
-                      <option value="Factor Analysis">Factor Analysis / PCA</option>
-                      <option value="Poisson">Poisson Regression</option>
-                      <option value="Tobit">Tobit (Censored Regression)</option>
-                      <option value="Cox PH">Cox Proportional Hazards</option>
-                      <option value="Quantile">Quantile Regression</option>
-                      <option value="ARIMA">ARIMA (Time Series Forecast)</option>
+                      {(() => {
+                        const common = COMMON_ESTIMATORS_BY_PROGRAM[toolType] || [];
+                        const commonSet = new Set(common);
+                        const other = (Object.keys(ESTIMATOR_LABELS) as AnalysisType[]).filter((a) => !commonSet.has(a));
+                        return (
+                          <>
+                            <optgroup label={`Common for ${toolType}`}>
+                              {common.map((a) => (
+                                <option key={a} value={a}>{ESTIMATOR_LABELS[a]}</option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Other Estimators">
+                              {other.map((a) => (
+                                <option key={a} value={a}>{ESTIMATOR_LABELS[a]}</option>
+                              ))}
+                            </optgroup>
+                          </>
+                        );
+                      })()}
                     </select>
                   </div>
                 </div>
