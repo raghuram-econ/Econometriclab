@@ -2442,6 +2442,23 @@ CORE RULES:
               // Ignore toFixed range/invalid values
             }
           }
+
+          // Percentage-form check: a raw decimal (e.g. R-squared 0.8179) legitimately
+          // reported as a rounded percentage (e.g. "81.8%"), and vice versa. Mirrors
+          // the hasPercentage allowance in interpreter-fidelity.test.ts, but rounds to
+          // the response's own decimal precision rather than a fixed epsilon so that
+          // "81.8" correctly matches "0.8179" (81.79 rounded to 1 place).
+          try {
+            const rawAsPercent = parseFloat((rawVal * 100).toFixed(k));
+            const rawAsFraction = parseFloat((rawVal / 100).toFixed(k));
+            const roundedResp2 = parseFloat(respVal.toFixed(k));
+            if (Math.abs(rawAsPercent - roundedResp2) < 1e-9 || Math.abs(rawAsFraction - roundedResp2) < 1e-9) {
+              matched = true;
+              break;
+            }
+          } catch (e) {
+            // Ignore toFixed range/invalid values
+          }
         }
 
         if (!matched) {
