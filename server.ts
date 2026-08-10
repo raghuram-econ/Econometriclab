@@ -2459,6 +2459,23 @@ CORE RULES:
           } catch (e) {
             // Ignore toFixed range/invalid values
           }
+
+          // Unsigned-magnitude check: prose legitimately drops the sign of a negative
+          // coefficient when the direction is already conveyed in words (e.g. "a 0.184
+          // percentage point reduction" for a coefficient of -0.1841205). Only applied
+          // as a last-resort fallback after exact/rounded/percentage checks fail.
+          if (k > 0) {
+            try {
+              const roundedRawAbs = parseFloat(Math.abs(rawVal).toFixed(k));
+              const roundedRespAbs = parseFloat(Math.abs(respVal).toFixed(k));
+              if (Math.abs(roundedRawAbs - roundedRespAbs) < 1e-9) {
+                matched = true;
+                break;
+              }
+            } catch (e) {
+              // Ignore toFixed range/invalid values
+            }
+          }
         }
 
         if (!matched) {
