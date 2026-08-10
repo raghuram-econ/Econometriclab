@@ -2401,9 +2401,23 @@ CORE RULES:
       const responseDecimals = extractResponseDecimals(responseData);
       const warningsSet = new Set<string>();
 
+      // Conventional significance/confidence thresholds (e.g. "p < .001") are standard
+      // reporting notation, not a citation of a raw value -- flagging them as unmatched
+      // produces false-alarm Fidelity Warnings on correct output. Mirrors the same
+      // allowlist in interpreter-fidelity.test.ts's isStandardThreshold check.
+      const STANDARD_THRESHOLDS = [
+        0.05, 0.01, 0.001, 0.1, 0.0001, 0.005,
+        0.95, 0.99, 0.90, 0.975, 0.025,
+        95.0, 99.0, 90.0, 97.5, 2.5, 5.0, 1.0, 10.0
+      ];
+
       for (const respStr of responseDecimals) {
         const respVal = parseFloat(respStr);
         if (isNaN(respVal)) continue;
+
+        if (STANDARD_THRESHOLDS.some((std) => Math.abs(Math.abs(respVal) - std) < 1e-7)) {
+          continue;
+        }
 
         const k = getDecimalPlaces(respStr);
         let matched = false;
