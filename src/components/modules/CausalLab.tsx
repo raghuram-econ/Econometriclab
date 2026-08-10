@@ -269,7 +269,33 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
       // error on coefficients, <0.1% on SEs -- see reference.test.ts).
       const firstStageXvars = [ivInstrument, ...ivControls];
       const firstStage = runOLS(data, ivEndogenous, firstStageXvars, true, false);
-      const firstStageF = firstStage.fStat || 0;
+
+      // Weak-instrument F-stat (Staiger-Stock/Stock-Yogo) must test the EXCLUDED
+      // instrument's own explanatory power, not the whole first-stage model's joint
+      // significance -- firstStage.fStat tests "instrument AND controls jointly zero",
+      // which stays large whenever the controls matter regardless of the instrument's
+      // actual strength. Computed instead via a restricted-vs-unrestricted RSS F-test:
+      // rerun the first stage with the instrument excluded, then compare fit.
+      // Confirmed live: with 14 real controls, firstStage.fStat read ~180 ("strong")
+      // for an instrument whose real partial F (verified against a published Card
+      // 1995 replication) is ~13 -- right at the weak-instrument threshold.
+      const restrictedFirstStage = ivControls.length > 0
+        ? runOLS(data, ivEndogenous, ivControls, true, false)
+        : null;
+      const nInstrumentsExcluded = 1; // just-identified case enforced above: exactly one instrument
+      const kUnrestricted = firstStageXvars.length + 1; // + intercept
+      const restrictedRSS = restrictedFirstStage
+        ? (restrictedFirstStage.rss ?? 0)
+        : (() => {
+            // No controls selected: the restricted model is intercept-only, so its
+            // RSS is just the total sum of squares of the endogenous variable.
+            const yVals = data.map((r: any) => parseFloat(r[ivEndogenous])).filter((v: number) => !isNaN(v));
+            const yMean = yVals.reduce((s: number, v: number) => s + v, 0) / yVals.length;
+            return yVals.reduce((s: number, v: number) => s + (v - yMean) * (v - yMean), 0);
+          })();
+      const unrestrictedRSS = firstStage.rss ?? 0;
+      const partialF = ((restrictedRSS - unrestrictedRSS) / nInstrumentsExcluded) / (unrestrictedRSS / (firstStage.n - kUnrestricted));
+      const firstStageF = Number.isFinite(partialF) ? partialF : 0;
       const isWeak = firstStageF < 10;
 
       const secondStage = estimateModel('IV', {
