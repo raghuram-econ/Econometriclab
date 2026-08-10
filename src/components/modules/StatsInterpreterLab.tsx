@@ -1249,7 +1249,13 @@ function StatsInterpreterLabComponent() {
                 <div className="text-right font-mono text-[10px] text-slate-500">
                   N = {(() => {
                     const df = parseInt(result?.diagnostics?.df ?? '');
-                    return Number.isFinite(df) ? (df + (result?.coefficients?.length ?? 0)).toString() : 'Not reported';
+                    const coeffCount = result?.coefficients?.length ?? 0;
+                    // N = df + k only holds for standard regression models, where df is the
+                    // residual degrees of freedom and k is the parameter count. Tests with no
+                    // regression coefficients (Chi-square, ANOVA, etc.) have an unrelated df
+                    // (e.g. Chi-square's own df), so applying this formula there silently
+                    // produces a wrong N instead of an honest "Not reported".
+                    return (Number.isFinite(df) && coeffCount > 0) ? (df + coeffCount).toString() : 'Not reported';
                   })()} • {toolType} ENGINE
                 </div>
               </div>
