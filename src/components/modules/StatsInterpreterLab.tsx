@@ -1720,17 +1720,21 @@ function StatsInterpreterLabComponent() {
                     <div>
                       <h5 className="font-bold text-[#1a2744] font-sans text-xs uppercase tracking-wider mb-1">2. Coefficient Interpretation</h5>
                       <div className="space-y-1.5">
-                        {(result?.coefficients ?? []).map((c, i) => (
-                          <p key={i}>
-                            <strong>{c.variable}</strong>: Estimated coefficient is {c.estimate}. {parseFloat(c.estimate || '0') > 0 ? "A positive marginal relationship" : "A negative marginal relationship"} is observed. 
-                            {c.stars ? ` This effect is statistically significant (p = ${c.pValue}), indicating a highly stable relationship that is extremely unlikely to have occurred by random variance.` : " This effect is not statistically significant at conventional levels."}
-                          </p>
-                        ))}
+                        {(result?.coefficients ?? []).map((c, i) => {
+                          const pStr = (c.pValue || '').trim();
+                          const isSig = pStr.startsWith('<') || (!isNaN(parseFloat(pStr)) && parseFloat(pStr) < 0.05);
+                          return (
+                            <p key={i}>
+                              <strong>{c.variable}</strong>: Estimated coefficient is {c.estimate}. {parseFloat(c.estimate || '0') > 0 ? "A positive marginal relationship" : "A negative marginal relationship"} is observed.
+                              {isSig ? ` This effect is statistically significant (p = ${c.pValue}), indicating a highly stable relationship that is extremely unlikely to have occurred by random variance.` : ` This effect is not statistically significant at conventional levels (p = ${c.pValue || 'N/A'}).`}
+                            </p>
+                          );
+                        })}
                       </div>
                     </div>
                     <div>
                       <h5 className="font-bold text-[#1a2744] font-sans text-xs uppercase tracking-wider mb-1">3. Model Fit Quality</h5>
-                      <p>The model displays an R-squared coefficient of {result?.diagnostics?.rSquared || 'N/A'}. This reveals that approximately {parseFloat(result?.diagnostics?.rSquared || '0') * 100}% of the systemic variation in {depVar || 'Y'} is successfully accounted for by our explanatory vectors. The Adjusted R-squared accounts for degrees of freedom penalization, registering at {result?.diagnostics?.adjRSquared || 'N/A'}.</p>
+                      <p>The model displays an R-squared coefficient of {result?.diagnostics?.rSquared || 'N/A'}. This reveals that approximately {!isNaN(parseFloat(result?.diagnostics?.rSquared || '')) ? (parseFloat(result!.diagnostics!.rSquared!) * 100).toFixed(2) : 'N/A'}% of the systemic variation in {depVar || 'Y'} is successfully accounted for by our explanatory vectors. The Adjusted R-squared accounts for degrees of freedom penalization, registering at {result?.diagnostics?.adjRSquared || 'N/A'}.</p>
                     </div>
                     <div>
                       <h5 className="font-bold text-[#1a2744] font-sans text-xs uppercase tracking-wider mb-1">4. Assumption Violations Found</h5>
