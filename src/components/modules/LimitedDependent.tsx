@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Binary, 
   Layers, 
@@ -105,6 +105,20 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
     if (s === codebook.zero) return 0;
     return NaN;
   };
+
+  // Reset every variable selection and result whenever the active dataset
+  // changes - none of these are auto-populated (the user always picks them
+  // manually), but with no reset they silently kept referring to columns
+  // from the previous dataset, invisible in the picker since it only lists
+  // the new dataset's columns, and a previous dataset's results could keep
+  // displaying under a new "ACTIVE DATA" banner.
+  const datasetKey = dataset?.name ?? null;
+  useEffect(() => {
+    setLpOutcome(''); setLpPredictors([]); setLpResult(null);
+    setAmeResults(null); setAmeError(null);
+    setTobitOutcome(''); setTobitPredictors([]); setTobitResult(null);
+    setOrderedOutcome(''); setOrderedPredictors([]); setOrderedResult(null);
+  }, [datasetKey]);
 
   if (!dataset) {
     return (

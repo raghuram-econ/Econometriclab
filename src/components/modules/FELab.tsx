@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Play, Layers, FlaskConical, CheckCircle2, FileDown, Info, X, HelpCircle, Check, ChevronRight, Sparkles, Database, Upload, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dataset, RegressionResult, PanelConfig } from '../../types';
@@ -123,6 +123,26 @@ export default function FELab({ dataset, onRunComplete, isLoading }: FELabProps)
   const [isEstimating, setIsEstimating] = useState(false);
   const [estimationError, setEstimationError] = useState<string | null>(null);
   const { navigateTo } = useNavigation();
+
+  // dependentVar/regressors are shared global store state (also used by
+  // OLS Lab, which resets them on dataset change). If a user switches
+  // datasets and comes straight here without passing through OLS Lab first,
+  // nothing else resets entityId/timeId/yVar/xVars, so they silently keep
+  // referring to columns from the previous dataset - invisible in the
+  // picker, which only lists the new dataset's columns.
+  const lastDatasetNameRef = useRef<string | undefined>(dataset?.name);
+  useEffect(() => {
+    if (dataset && dataset.name !== lastDatasetNameRef.current) {
+      setEntityId('');
+      setTimeId('');
+      setYVar('');
+      setXVars([]);
+      setResults(null);
+      setEstimationError(null);
+      setMistakes([]);
+    }
+    lastDatasetNameRef.current = dataset?.name;
+  }, [dataset]);
 
   if (!dataset) {
     return (

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Target,
   Info,
@@ -106,6 +106,30 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const variables = useMemo(() => dataset?.variables || [], [dataset]);
   const numericVars = useMemo(() => variables.filter(v => v.type === 'numeric'), [variables]);
   const idVars = useMemo(() => variables.filter(v => v.type === 'categorical' || v.type === 'numeric'), [variables]);
+
+  // Reset every variable selection and result across all tabs whenever the
+  // active dataset changes - none of these are auto-populated (the user
+  // always picks them manually), but with no reset they silently kept
+  // referring to columns from the previous dataset, invisible in the picker
+  // since it only lists the new dataset's columns, and a previous dataset's
+  // results could keep displaying under a new "ACTIVE DATA" banner.
+  const datasetKey = dataset?.name ?? null;
+  useEffect(() => {
+    setDidOutcome(''); setDidTreatment(''); setDidTime(''); setDidControls([]); setDidClusterVar('');
+    setDidResult(null);
+    setSdidId(''); setSdidTime(''); setSdidOutcome(''); setSdidGroup('');
+    setSdidResult(null); setSdidError(null);
+    setIvOutcome(''); setIvEndogenous(''); setIvInstrument(''); setIvControls([]);
+    setIvResult(null);
+    setRdOutcome(''); setRdRunning(''); setRdTreatment('');
+    setRdResult(null);
+    setGmmEntity(''); setGmmTime(''); setGmmDep(''); setGmmInstruments([]);
+    setGmmResult(null);
+    setScUnitVar(''); setScTimeVar(''); setScOutcomeVar(''); setScTreatedUnit('');
+    setScPreStart(''); setScPreEnd(''); setScPostEnd('');
+    setScResult(null); setScError(null);
+    setEstimationError(null);
+  }, [datasetKey]);
 
   if (!dataset) {
     return (
