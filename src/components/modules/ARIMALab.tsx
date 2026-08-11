@@ -59,6 +59,7 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
   const [pythonResult, setPythonResult] = useState<PythonARIMAResult | null>(null);
   const [isPythonRunning, setIsPythonRunning] = useState(false);
   const [pythonError, setPythonError] = useState<string | null>(null);
+  const [isAutoSelecting, setIsAutoSelecting] = useState(false);
 
   if (!dataset) {
     return (
@@ -70,8 +71,6 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
   }
 
   const numericVars = (dataset.variables || []).filter(v => v.type === 'numeric').map(v => v.name);
-
-  const [isAutoSelecting, setIsAutoSelecting] = useState(false);
 
   const handleSuggest = () => {
     if (!targetVar) {
