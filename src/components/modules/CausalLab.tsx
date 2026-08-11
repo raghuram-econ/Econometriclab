@@ -52,6 +52,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [sdidGroup, setSdidGroup] = useState('');
   const [sdidControlGroup, setSdidControlGroup] = useState<'nevertreated' | 'notyettreated'>('nevertreated');
   const [sdidResult, setSdidResult] = useState<any | null>(null);
+  const [sdidCodeCopied, setSdidCodeCopied] = useState<string | null>(null);
   const [sdidRunning, setSdidRunning] = useState(false);
   const [sdidError, setSdidError] = useState<string | null>(null);
 
@@ -69,6 +70,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [rdBandwidth, setRdBandwidth] = useState('1');
   const [rdPolynomial, setRdPolynomial] = useState<'linear' | 'quadratic'>('linear');
   const [rdResult, setRdResult] = useState<any | null>(null);
+  const [rdCodeCopied, setRdCodeCopied] = useState<string | null>(null);
   const [researchGradeRd, setResearchGradeRd] = useState(false);
   // Fuzzy RD (imperfect compliance): a separate treatment-status column,
   // distinct from the above/below-cutoff indicator implied by rdRunning vs rdCutoff.
@@ -82,6 +84,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [gmmDep, setGmmDep] = useState('');
   const [gmmInstruments, setGmmInstruments] = useState<string[]>([]);
   const [gmmResult, setGmmResult] = useState<any | null>(null);
+  const [gmmCodeCopied, setGmmCodeCopied] = useState<string | null>(null);
 
   // Synthetic Control Method state (Abadie-Diamond-Hainmueller, Python backend)
   const [scUnitVar, setScUnitVar] = useState('');
@@ -92,6 +95,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
   const [scPreEnd, setScPreEnd] = useState('');
   const [scPostEnd, setScPostEnd] = useState('');
   const [scResult, setScResult] = useState<any | null>(null);
+  const [scCodeCopied, setScCodeCopied] = useState<string | null>(null);
   const [scRunning, setScRunning] = useState(false);
   const [scError, setScError] = useState<string | null>(null);
 
@@ -273,6 +277,85 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
       if (success) {
         setDidCodeCopied(lang);
         setTimeout(() => setDidCodeCopied(null), 2000);
+      }
+    });
+  };
+
+  // Reproducibility code for the currently estimated RD spec. There are three
+  // genuinely different estimators behind this tab (see handleRunRD above),
+  // so the generated code must match whichever one actually produced
+  // rdResult, not a single generic "RDD" template:
+  //  - engine === 'python': the real rdrobust package (MSE-optimal
+  //    bandwidth, bias-corrected) -- this one DOES match Stata/R's rdrobust.
+  //  - design === 'fuzzy' (browser): local 2SLS -- D_actual instrumented by
+  //    the above/below-cutoff indicator, bandwidth-filtered, uniform kernel.
+  //  - sharp (browser): two SEPARATE OLS fits (below/above cutoff), RD
+  //    estimate = predAbove - predBelow, SE = sqrt(seBelow^2 + seAbove^2).
+  //    This is NOT the same point/SE as a single pooled interacted
+  //    regression, so it must be replicated as two separate regressions.
+  const getRdCode = (lang: 'r' | 'stata' | 'python'): string => {
+    if (!rdResult) return '';
+    const y = rdResult.rdOutcome;
+    const x = rdResult.rdRunning;
+    const c = rdResult.cutoff;
+    const treat = rdResult.rdTreatment;
+
+    if (rdResult.engine === 'python') {
+      const fuzzyArg = rdResult.design === 'fuzzy' ? `, fuzzy = df$${treat}` : '';
+      const fuzzyArgPy = rdResult.design === 'fuzzy' ? `, fuzzy=df['${treat}']` : '';
+      const fuzzyArgStata = rdResult.design === 'fuzzy' ? ` fuzzy(${treat})` : '';
+      if (lang === 'stata') return `* Requires the community rdrobust package: ssc install rdrobust\nrdrobust ${y} ${x}, c(${c})${fuzzyArgStata}`;
+      if (lang === 'python') return `# pip install rdrobust\nfrom rdrobust import rdrobust\n\nresult = rdrobust(y=df['${y}'], x=df['${x}'], c=${c}${fuzzyArgPy})\nprint(result)`;
+      return `# install.packages("rdrobust")\nlibrary(rdrobust)\n\nsummary(rdrobust(y = df$${y}, x = df$${x}, c = ${c}${fuzzyArg}))`;
+    }
+
+    if (rdResult.design === 'fuzzy') {
+      const bw = rdResult.bandwidth;
+      if (lang === 'stata') {
+        return `* Local 2SLS fuzzy RD (uniform kernel, fixed bandwidth -- not rdrobust's\n* MSE-optimal bandwidth/bias correction; see method note in the app)\ngen d_above = (${x} >= ${c})\ngen x_tilde = ${x} - ${c}\nivregress 2sls ${y} x_tilde (${treat} = d_above) if abs(${x} - ${c}) <= ${bw}`;
+      }
+      if (lang === 'python') {
+        return `# Local 2SLS fuzzy RD (uniform kernel, fixed bandwidth -- not rdrobust's\n# MSE-optimal bandwidth/bias correction; see method note in the app)\nimport pandas as pd\nfrom linearmodels.iv import IV2SLS\n\ndf['d_above'] = (df['${x}'] >= ${c}).astype(int)\ndf['x_tilde'] = df['${x}'] - ${c}\nsub = df[(df['${x}'] - ${c}).abs() <= ${bw}]\n\nmodel = IV2SLS(sub['${y}'], sub[['x_tilde']], sub['${treat}'], sub[['d_above']])\nresults = model.fit()\nprint(results.summary)`;
+      }
+      return `# Local 2SLS fuzzy RD (uniform kernel, fixed bandwidth -- not rdrobust's\n# MSE-optimal bandwidth/bias correction; see method note in the app)\nlibrary(fixest)\n\ndf$d_above <- as.integer(df$${x} >= ${c})\ndf$x_tilde <- df$${x} - ${c}\nsub <- df[abs(df$${x} - ${c}) <= ${bw}, ]\n\nmodel <- feols(${y} ~ x_tilde | ${treat} ~ d_above, data = sub)\nsummary(model)`;
+    }
+
+    // Sharp, browser engine: two separate regressions, not a pooled interaction model.
+    const bw = rdResult.bandwidth;
+    const quad = rdResult.rdPolynomial === 'quadratic';
+    if (lang === 'stata') {
+      let code = `* Two SEPARATE local regressions (below/above cutoff) -- the RD estimate\n* is predAbove minus predBelow, SE is sqrt(seBelow^2 + seAbove^2), NOT the\n* output of a single pooled treatment-interaction regression\ngen r_centered = ${x} - ${c}\n`;
+      if (quad) code += `gen r_centered_sq = r_centered^2\n`;
+      const rhs = quad ? 'r_centered r_centered_sq' : 'r_centered';
+      code += `\nregress ${y} ${rhs} if r_centered < 0 & abs(${x} - ${c}) <= ${bw}\nscalar predBelow = _b[_cons]\nscalar seBelow = _se[_cons]\n\n`;
+      code += `regress ${y} ${rhs} if r_centered >= 0 & abs(${x} - ${c}) <= ${bw}\nscalar predAbove = _b[_cons]\nscalar seAbove = _se[_cons]\n\n`;
+      code += `di "RD estimate: " predAbove - predBelow\ndi "RD SE: " sqrt(seBelow^2 + seAbove^2)`;
+      return code;
+    }
+    if (lang === 'python') {
+      let code = `# Two SEPARATE local regressions (below/above cutoff) -- the RD estimate\n# is predAbove minus predBelow, SE is sqrt(seBelow**2 + seAbove**2), NOT\n# the output of a single pooled treatment-interaction regression\nimport numpy as np\nimport statsmodels.api as sm\n\ndf['r_centered'] = df['${x}'] - ${c}\n`;
+      if (quad) code += `df['r_centered_sq'] = df['r_centered'] ** 2\n`;
+      const cols = quad ? "['r_centered', 'r_centered_sq']" : "['r_centered']";
+      code += `sub = df[df['${x}'].sub(${c}).abs() <= ${bw}]\n\n`;
+      code += `below = sub[sub['r_centered'] < 0]\nX_below = sm.add_constant(below[${cols}])\nres_below = sm.OLS(below['${y}'], X_below).fit()\n\n`;
+      code += `above = sub[sub['r_centered'] >= 0]\nX_above = sm.add_constant(above[${cols}])\nres_above = sm.OLS(above['${y}'], X_above).fit()\n\n`;
+      code += `rd_estimate = res_above.params['const'] - res_below.params['const']\nrd_se = np.sqrt(res_below.bse['const']**2 + res_above.bse['const']**2)\nprint(rd_estimate, rd_se)`;
+      return code;
+    }
+    let code = `# Two SEPARATE local regressions (below/above cutoff) -- the RD estimate\n# is predAbove minus predBelow, SE is sqrt(seBelow^2 + seAbove^2), NOT the\n# output of a single pooled treatment-interaction regression\ndf$r_centered <- df$${x} - ${c}\n`;
+    if (quad) code += `df$r_centered_sq <- df$r_centered^2\n`;
+    const rhsR = quad ? 'r_centered + r_centered_sq' : 'r_centered';
+    code += `sub <- df[abs(df$${x} - ${c}) <= ${bw}, ]\n\n`;
+    code += `below <- lm(${y} ~ ${rhsR}, data = sub[sub$r_centered < 0, ])\nabove <- lm(${y} ~ ${rhsR}, data = sub[sub$r_centered >= 0, ])\n\n`;
+    code += `rd_estimate <- coef(above)["(Intercept)"] - coef(below)["(Intercept)"]\nrd_se <- sqrt(summary(below)$coefficients["(Intercept)", "Std. Error"]^2 + summary(above)$coefficients["(Intercept)", "Std. Error"]^2)\ncat(rd_estimate, rd_se)`;
+    return code;
+  };
+
+  const handleCopyRdCode = (lang: 'r' | 'stata' | 'python') => {
+    copyTextToClipboard(getRdCode(lang)).then(success => {
+      if (success) {
+        setRdCodeCopied(lang);
+        setTimeout(() => setRdCodeCopied(null), 2000);
       }
     });
   };
@@ -600,7 +683,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
         columnNames: cols,
         gmmType,
       });
-      setGmmResult({ ...res, gmmDep, gmmEntity, gmmTime, gmmType });
+      setGmmResult({ ...res, gmmDep, gmmEntity, gmmTime, gmmType, gmmInstruments });
       const specLabel = gmmType === 'system'
         ? `Dynamic Panel System GMM (Blundell-Bond): ${gmmDep} on L1.${gmmDep}` + (gmmInstruments.length ? ` + ${gmmInstruments.join(' + ')}` : '')
         : `Dynamic Panel GMM (Arellano-Bond): d.${gmmDep} on d.L1.${gmmDep}` + (gmmInstruments.length ? ` + ${gmmInstruments.join(' + ')}` : '');
@@ -624,6 +707,76 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
     }
   };
 
+  // Reproducibility code for the GMM tab. The two gmmType values are backed
+  // by genuinely different estimators server-side (backend/main.py's
+  // /python/gmm), not just different labels on the same math:
+  //  - 'system': real pydynpd (regression.abond), the same package
+  //    backend/main.py itself uses, with lag(2:.) instruments -- the
+  //    standard Blundell-Bond moment conditions, so xtabond2/pgmm-style
+  //    code genuinely approximates it.
+  //  - 'difference': a hand-rolled Anderson-Hsiao-style estimator (single
+  //    y_{t-2} instrument for the differenced lagged DV via linearmodels
+  //    IVGMM) -- NOT full Arellano-Bond with the usual GMM-style expanding
+  //    instrument set. Genuine xtabond/xtabond2/pgmm calls would use a much
+  //    larger instrument matrix and would NOT reproduce this tab's numbers,
+  //    so the replication code mirrors the app's actual single-instrument
+  //    construction instead.
+  const getGmmCode = (lang: 'r' | 'stata' | 'python'): string => {
+    if (!gmmResult) return '';
+    const dep = gmmResult.gmmDep;
+    const ent = gmmResult.gmmEntity;
+    const time = gmmResult.gmmTime;
+    const instr: string[] = gmmResult.gmmInstruments || [];
+
+    if (gmmResult.gmmType === 'system') {
+      const instrList = instr.join(' ');
+      if (lang === 'python') {
+        return `# pip install pydynpd\nfrom pydynpd import regression\n\ncommand_str = "${dep} L1.${dep}${instr.map(i => ` ${i}`).join('')} | gmm(${dep}, 2:.) | onestep"\nmydpd = regression.abond(command_str, df, ["${ent}", "${time}"])\nprint(mydpd.models[0].regression_table)`;
+      }
+      if (lang === 'stata') {
+        return `* Requires the community xtabond2 package: ssc install xtabond2\n* Same Blundell-Bond moment conditions as this app's pydynpd backend\n* (a different implementation of the same standard estimator -- expect\n* close but not bit-identical numbers)\nxtset ${ent} ${time}\nxtabond2 ${dep} L.${dep}${instrList ? ' ' + instrList : ''}, gmm(${dep}, lag(2 .)) ${instrList ? `iv(${instrList}) ` : ''}system onestep`;
+      }
+      return `# install.packages("plm")\nlibrary(plm)\n\npdata <- pdata.frame(df, index = c("${ent}", "${time}"))\n# Same Blundell-Bond moment conditions as this app's pydynpd backend (a\n# different implementation of the same standard estimator -- check pgmm's\n# lag-range argument against the app's gmm(${dep}, 2:.) if numbers don't\n# align closely).\nmodel <- pgmm(${dep} ~ lag(${dep}, 1)${instr.map(i => ` + ${i}`).join('')} | lag(${dep}, 2:99), data = pdata, transformation = "ld", model = "onestep")\nsummary(model)`;
+    }
+
+    // 'difference': mirror the app's own Anderson-Hsiao-style construction
+    // exactly (see backend/main.py run_gmm) -- not a generic Arellano-Bond call.
+    if (lang === 'python') {
+      let code = `import pandas as pd\nimport statsmodels.api as sm\nfrom linearmodels.iv import IVGMM\n\ndf = df.set_index(['${ent}', '${time}']).sort_index()\n\n`;
+      code += `df['y_lag1'] = df.groupby(level=0)['${dep}'].shift(1)\ndf['y_lag2'] = df.groupby(level=0)['${dep}'].shift(2)\ndf['dy'] = df['${dep}'] - df['y_lag1']\ndf['dy_lag1'] = df['y_lag1'] - df['y_lag2']\n\n`;
+      instr.forEach(c => { code += `df['d_${c}'] = df['${c}'] - df.groupby(level=0)['${c}'].shift(1)\n`; });
+      const exogCols = instr.map(c => `'d_${c}'`).join(', ');
+      code += `\nmodel_df = df[['dy', 'dy_lag1', 'y_lag2'${instr.length ? ", " + instr.map(c => `'d_${c}'`).join(', ') : ''}]].dropna()\n\n`;
+      code += `y = model_df['dy']\nendog = model_df['dy_lag1']\ninstrument = model_df['y_lag2']\n`;
+      code += instr.length ? `exog = sm.add_constant(model_df[[${exogCols}]])\n` : `exog = pd.Series(1, index=model_df.index, name='const')\n`;
+      code += `\nmodel = IVGMM(y, exog, endog, instrument)\nresults = model.fit()\nprint(results.summary)`;
+      return code;
+    }
+    if (lang === 'stata') {
+      let code = `* Anderson-Hsiao-style single-lag IV (matches this app's exact\n* construction -- NOT full Arellano-Bond with the usual expanding\n* GMM instrument set, which would use a different instrument matrix\n* and NOT reproduce these numbers)\nxtset ${ent} ${time}\ngen dy = D.${dep}\ngen dy_lag1 = L1.D.${dep}\ngen y_lag2 = L2.${dep}\n`;
+      instr.forEach(c => { code += `gen d_${c} = D.${c}\n`; });
+      const rhs = instr.map(c => `d_${c}`).join(' ');
+      code += `\nivregress gmm dy ${rhs}${rhs ? ' ' : ''}(dy_lag1 = y_lag2)`;
+      return code;
+    }
+    let code = `library(dplyr)\nlibrary(AER)\n\ndf <- df %>%\n  group_by(${ent}) %>%\n  arrange(${time}) %>%\n  mutate(\n    y_lag1 = lag(${dep}, 1),\n    y_lag2 = lag(${dep}, 2),\n    dy = ${dep} - y_lag1,\n    dy_lag1 = y_lag1 - y_lag2`;
+    instr.forEach(c => { code += `,\n    d_${c} = ${c} - lag(${c}, 1)`; });
+    code += `\n  ) %>%\n  ungroup() %>%\n  na.omit()\n\n`;
+    const exogFormula = instr.map(c => `d_${c}`).join(' + ');
+    code += `# Anderson-Hsiao-style single-lag IV (matches this app's exact\n# construction -- NOT full Arellano-Bond with the usual expanding GMM\n# instrument set, which would use a different instrument matrix and\n# NOT reproduce these numbers)\n`;
+    code += `model <- ivreg(dy ~ dy_lag1${exogFormula ? ' + ' + exogFormula : ''} | y_lag2${exogFormula ? ' + ' + exogFormula : ''}, data = df)\nsummary(model)`;
+    return code;
+  };
+
+  const handleCopyGmmCode = (lang: 'r' | 'stata' | 'python') => {
+    copyTextToClipboard(getGmmCode(lang)).then(success => {
+      if (success) {
+        setGmmCodeCopied(lang);
+        setTimeout(() => setGmmCodeCopied(null), 2000);
+      }
+    });
+  };
+
   // --- SYNTHETIC CONTROL METHOD (Abadie-Diamond-Hainmueller, Python backend) ---
   const handleRunSynth = async () => {
     if (!scUnitVar || !scTimeVar || !scOutcomeVar || !scTreatedUnit || !scPreStart || !scPreEnd || !scPostEnd) return;
@@ -638,7 +791,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
         treatedUnit: scTreatedUnit, controlUnits,
         preperiodStart: parseFloat(scPreStart), preperiodEnd: parseFloat(scPreEnd), postperiodEnd: parseFloat(scPostEnd),
       });
-      setScResult(res);
+      setScResult({ ...res, scUnitVar, scTimeVar, scOutcomeVar, scTreatedUnit, controlUnits, scPreStart: parseFloat(scPreStart), scPreEnd: parseFloat(scPreEnd), scPostEnd: parseFloat(scPostEnd) });
       onRunComplete({
         type: 'generic',
         specification: `Synthetic Control: ${scTreatedUnit} vs. donor pool (${controlUnits.length} units)`,
@@ -649,6 +802,35 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
     } finally {
       setScRunning(false);
     }
+  };
+
+  // Reproducibility code for Synthetic Control. Matches backend/main.py's
+  // run_synthetic_control exactly: predictors default to [outcomeVar] alone
+  // (no separate predictor variables are collected by this tab's UI),
+  // predictors_op="mean", and the optimization window equals the full
+  // pre-period. Real pysyncon/Synth/synth calls, all implementing the same
+  // Abadie-Diamond-Hainmueller estimator the backend uses.
+  const getSynthCode = (lang: 'r' | 'stata' | 'python'): string => {
+    if (!scResult) return '';
+    const { scUnitVar: unit, scTimeVar: time, scOutcomeVar: y, scTreatedUnit: treated, controlUnits, scPreStart: preStart, scPreEnd: preEnd, scPostEnd: postEnd } = scResult;
+    const controlsList = (controlUnits || []).map((c: string) => `"${c}"`).join(', ');
+
+    if (lang === 'python') {
+      return `# pip install pysyncon\nfrom pysyncon import Dataprep, Synth\n\ndataprep = Dataprep(\n    foo=df, predictors=["${y}"], predictors_op="mean",\n    time_predictors_prior=range(${preStart}, ${preEnd} + 1),\n    dependent="${y}", unit_variable="${unit}", time_variable="${time}",\n    treatment_identifier="${treated}", controls_identifier=[${controlsList}],\n    time_optimize_ssr=range(${preStart}, ${preEnd} + 1),\n)\nsynth = Synth()\nsynth.fit(dataprep=dataprep)\nprint(synth.weights())\nprint(synth.att(time_period=range(${preEnd} + 1, ${postEnd} + 1)))`;
+    }
+    if (lang === 'stata') {
+      return `* Requires the Synth package (Abadie, Diamond & Hainmueller):\n* ssc install synth\ntsset ${unit} ${time}\nsynth ${y} ${y}(${preStart}(1)${preEnd}), trunit(${treated}) trperiod(${preEnd + 1}) ///\n  xperiod(${preStart}(1)${preEnd})`;
+    }
+    return `# install.packages("Synth")\nlibrary(Synth)\n\ndataprep.out <- dataprep(\n  foo = df, predictors = "${y}", predictors.op = "mean",\n  time.predictors.prior = ${preStart}:${preEnd},\n  dependent = "${y}", unit.variable = "${unit}", time.variable = "${time}",\n  treatment.identifier = "${treated}", controls.identifier = c(${controlsList}),\n  time.optimize.ssr = ${preStart}:${preEnd}, time.plot = ${preStart}:${postEnd}\n)\nsynth.out <- synth(dataprep.out)\nsynth.tables <- synth.tab(dataprep.res = dataprep.out, synth.res = synth.out)\nprint(synth.tables$tab.w)`;
+  };
+
+  const handleCopySynthCode = (lang: 'r' | 'stata' | 'python') => {
+    copyTextToClipboard(getSynthCode(lang)).then(success => {
+      if (success) {
+        setScCodeCopied(lang);
+        setTimeout(() => setScCodeCopied(null), 2000);
+      }
+    });
   };
 
   // --- STAGGERED-ADOPTION DIFFERENCE-IN-DIFFERENCES (Callaway-Sant'Anna) ---
@@ -662,7 +844,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
         idVar: sdidId, timeVar: sdidTime, outcomeVar: sdidOutcome, groupVar: sdidGroup,
         controlGroup: sdidControlGroup,
       });
-      setSdidResult(res);
+      setSdidResult({ ...res, sdidId, sdidTime, sdidOutcome, sdidGroup, sdidControlGroup });
       onRunComplete({
         type: 'generic',
         specification: `Staggered DiD (Callaway-Sant'Anna): ${sdidOutcome} ~ cohort(${sdidGroup})`,
@@ -673,6 +855,33 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
     } finally {
       setSdidRunning(false);
     }
+  };
+
+  // Reproducibility code for Staggered DiD. Matches backend/main.py's
+  // run_staggered_did exactly: csdid's ATTgt(..., control_group=[cg]),
+  // fit(est_method="dr") (doubly robust), then aggte(typec="dynamic") and
+  // aggte(typec="simple"). Real csdid/did/csdid-Stata calls, all
+  // implementing the same Callaway-Sant'Anna estimator the backend uses.
+  const getStaggeredCode = (lang: 'r' | 'stata' | 'python'): string => {
+    if (!sdidResult) return '';
+    const { sdidId: id, sdidTime: time, sdidOutcome: y, sdidGroup: group, sdidControlGroup: cg } = sdidResult;
+
+    if (lang === 'python') {
+      return `# pip install csdid\nfrom csdid.att_gt import ATTgt\n\natt_gt = ATTgt(\n    yname="${y}", tname="${time}", idname="${id}", gname="${group}",\n    data=df, control_group=["${cg}"],\n)\nfitted = att_gt.fit(est_method="dr")\nprint(fitted.results)\n\ndynamic = fitted.aggte(typec="dynamic")\nsimple = fitted.aggte(typec="simple")\nprint(dynamic.atte)\nprint(simple.atte)`;
+    }
+    if (lang === 'stata') {
+      return `* Requires the community csdid package (Rios-Avila, Sant'Anna & Callaway):\n* ssc install csdid\n* ssc install drdid\ncsdid ${y}, ivar(${id}) time(${time}) gvar(${group}) method(dripw) ///\n  ${cg === 'notyettreated' ? 'notyet' : ''}\nestat event, estore(cs)\nestat simple`;
+    }
+    return `# install.packages("did")\nlibrary(did)\n\natt_gt <- att_gt(\n  yname = "${y}", tname = "${time}", idname = "${id}", gname = "${group}",\n  data = df, control_group = "${cg}", est_method = "dr"\n)\n\ndynamic <- aggte(att_gt, type = "dynamic")\nsimple <- aggte(att_gt, type = "simple")\nsummary(dynamic)\nsummary(simple)`;
+  };
+
+  const handleCopyStaggeredCode = (lang: 'r' | 'stata' | 'python') => {
+    copyTextToClipboard(getStaggeredCode(lang)).then(success => {
+      if (success) {
+        setSdidCodeCopied(lang);
+        setTimeout(() => setSdidCodeCopied(null), 2000);
+      }
+    });
   };
 
   return (
@@ -984,6 +1193,35 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                     <p className="text-xs text-stone-600 leading-relaxed font-serif">
                       Pre-treatment (e &lt; 0) coefficients near zero support the parallel-trends assumption. Post-treatment (e &ge; 0) coefficients are the treatment effect at each relative period since adoption, estimated separately for each cohort then averaged (doubly-robust estimator), avoiding the negative-weighting bias of naive two-way fixed-effects DiD under staggered timing.
                     </p>
+                  </div>
+
+                  <div className="bg-white border border-stone-200 rounded-2xl p-6">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4 flex items-center gap-2">
+                      <Terminal className="w-4 h-4 text-stone-600" />
+                      Institutional Reproducibility Code
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {(['stata', 'r', 'python'] as const).map(lang => (
+                        <div key={lang} className="bg-slate-900 rounded-xl overflow-hidden border border-slate-800">
+                          <div className="px-4 py-2 bg-slate-800 flex items-center justify-between">
+                            <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">
+                              {lang === 'r' ? 'R (.R)' : lang === 'stata' ? 'Stata (.do)' : 'Python (.py)'}
+                            </span>
+                            <button
+                              onClick={() => handleCopyStaggeredCode(lang)}
+                              className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                            >
+                              {sdidCodeCopied === lang ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          </div>
+                          <div className="p-4">
+                            <code className="text-[11px] font-mono text-slate-300 block whitespace-pre-wrap leading-relaxed">
+                              {getStaggeredCode(lang)}
+                            </code>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )
@@ -1619,6 +1857,37 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                 </div>
               </div>
             )}
+
+            {rdResult && (
+              <div className="bg-white border border-stone-200 rounded-2xl p-6">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4 flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-stone-600" />
+                  Institutional Reproducibility Code
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {(['stata', 'r', 'python'] as const).map(lang => (
+                    <div key={lang} className="bg-slate-900 rounded-xl overflow-hidden border border-slate-800">
+                      <div className="px-4 py-2 bg-slate-800 flex items-center justify-between">
+                        <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">
+                          {lang === 'r' ? 'R (.R)' : lang === 'stata' ? 'Stata (.do)' : 'Python (.py)'}
+                        </span>
+                        <button
+                          onClick={() => handleCopyRdCode(lang)}
+                          className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                          {rdCodeCopied === lang ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                      <div className="p-4">
+                        <code className="text-[11px] font-mono text-slate-300 block whitespace-pre-wrap leading-relaxed">
+                          {getRdCode(lang)}
+                        </code>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1771,6 +2040,35 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                     </table>
                   </div>
                 </div>
+
+                <div className="bg-white border border-stone-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4 flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-stone-600" />
+                    Institutional Reproducibility Code
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {(['stata', 'r', 'python'] as const).map(lang => (
+                      <div key={lang} className="bg-slate-900 rounded-xl overflow-hidden border border-slate-800">
+                        <div className="px-4 py-2 bg-slate-800 flex items-center justify-between">
+                          <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">
+                            {lang === 'r' ? 'R (.R)' : lang === 'stata' ? 'Stata (.do)' : 'Python (.py)'}
+                          </span>
+                          <button
+                            onClick={() => handleCopyGmmCode(lang)}
+                            className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                          >
+                            {gmmCodeCopied === lang ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                        <div className="p-4">
+                          <code className="text-[11px] font-mono text-slate-300 block whitespace-pre-wrap leading-relaxed">
+                            {getGmmCode(lang)}
+                          </code>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -1896,6 +2194,35 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                   <p className="text-xs text-stone-600 leading-relaxed font-serif">
                     The synthetic {scTreatedUnit} is a weighted combination of the donor units above, chosen to best match {scTreatedUnit}'s pre-treatment ({scPreStart}&ndash;{parseFloat(scPreEnd || '0') - 1}) outcome path (low MSPE = good fit). The average post-treatment gap between the actual and synthetic path is the estimated treatment effect, with an inferential SE from placebo-style variation.
                   </p>
+                </div>
+
+                <div className="bg-white border border-stone-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900 mb-4 flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-stone-600" />
+                    Institutional Reproducibility Code
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {(['stata', 'r', 'python'] as const).map(lang => (
+                      <div key={lang} className="bg-slate-900 rounded-xl overflow-hidden border border-slate-800">
+                        <div className="px-4 py-2 bg-slate-800 flex items-center justify-between">
+                          <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">
+                            {lang === 'r' ? 'R (.R)' : lang === 'stata' ? 'Stata (.do)' : 'Python (.py)'}
+                          </span>
+                          <button
+                            onClick={() => handleCopySynthCode(lang)}
+                            className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                          >
+                            {scCodeCopied === lang ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                        <div className="p-4">
+                          <code className="text-[11px] font-mono text-slate-300 block whitespace-pre-wrap leading-relaxed">
+                            {getSynthCode(lang)}
+                          </code>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
