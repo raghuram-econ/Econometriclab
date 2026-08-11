@@ -21,6 +21,7 @@ import { useNavigation } from '../../hooks/useNavigation';
 import { ModuleIntroCard } from '../shared/ModuleIntroCard';
 import { cn } from '../../lib/utils';
 import { runOLS, preprocessDataAndVars } from '../../lib/econometrics/ols';
+import { jacobiEigenvalues } from './FactorAnalysisLab';
 
 // Error function (Abramowitz & Stegun 7.1.26, |error| < 1.5e-7) used for the
 // chi-squared(1) p-value of the lag-1 LM autocorrelation test below.
@@ -209,6 +210,50 @@ function computeGoldfeldQuandtTest(recon: ReconResult): HeteroTestResult {
   }
 }
 
+// The scale-invariant condition number of X: sqrt(largest / smallest
+// eigenvalue) of the correlation matrix of the regressors (the same
+// standardization VIF already uses). Requires the reconstructed
+// per-observation regressor matrix, so it's only available when
+// reconstructModelData() succeeded; callers must fall back to a cruder
+// VIF-derived estimate otherwise (see conditionNumberFallback below), and
+// must not claim this fallback "calculates eigenvalues" since it doesn't.
+function computeConditionNumber(recon: ReconResult): number | null {
+  if (!recon.ok) return null;
+  const { filteredData, finalXVars } = recon;
+  const k = finalXVars.length;
+  const n = filteredData.length;
+  if (k < 2 || n < k + 2) return null;
+
+  const means = finalXVars.map(v => filteredData.reduce((s: number, row: any) => s + parseFloat(row[v]), 0) / n);
+  const stds = finalXVars.map((v, j) => {
+    const m = means[j] ?? 0;
+    const variance = filteredData.reduce((s: number, row: any) => s + (parseFloat(row[v]) - m) ** 2, 0) / n;
+    return Math.sqrt(variance) || 1.0;
+  });
+  const corr: number[][] = Array.from({ length: k }, () => Array(k).fill(0));
+  for (let i = 0; i < k; i++) {
+    for (let j = 0; j < k; j++) {
+      let s = 0;
+      for (const row of filteredData) {
+        const zi = (parseFloat(row[finalXVars[i]!]) - (means[i] ?? 0)) / (stds[i] ?? 1);
+        const zj = (parseFloat(row[finalXVars[j]!]) - (means[j] ?? 0)) / (stds[j] ?? 1);
+        s += zi * zj;
+      }
+      corr[i]![j] = s / n;
+    }
+  }
+  try {
+    const { eigenvalues } = jacobiEigenvalues(corr);
+    const vals = eigenvalues.map(Number).filter(v => Number.isFinite(v));
+    if (vals.length === 0) return null;
+    const maxEig = Math.max(...vals);
+    const minEig = Math.max(Math.min(...vals), 1e-10);
+    return Math.sqrt(maxEig / minEig);
+  } catch {
+    return null;
+  }
+}
+
 // Pedagogical example models to act as fallback if history is empty
 const EXAMPLE_DIAG_MODELS = [
   {
@@ -381,10 +426,21 @@ export function DiagnosticsCenter() {
   const bpP = model.results.breuschPaganPValue;
   const jbStat = model.results.jarqueBeraStat;
   const jbP = model.results.jarqueBeraPValue;
-  
-  // Calculate Condition Number proxy
+
+  // White's General Test, Goldfeld-Quandt, and the condition number all need
+  // the raw per-observation regressor matrix, which isn't stored on the
+  // saved model -- so we reconstruct it (with validation) from the dataset
+  // currently loaded in the workspace. See reconstructModelData() above.
+  const dataRecon = reconstructModelData(model, currentDataset);
+
+  // Condition number: use the real eigenvalue-based computation when the
+  // regressor matrix could be reconstructed; otherwise fall back to a
+  // clearly-labeled VIF-derived estimate (this fallback does NOT compute
+  // eigenvalues, and the UI text below must not claim it does).
+  const realConditionNumber = computeConditionNumber(dataRecon);
   const maxVif = Object.values(vifs).length > 0 ? Math.max(...(Object.values(vifs) as number[])) : 1.0;
-  const conditionNumber = Math.sqrt(maxVif) * 10; // Rule-of-thumb estimate from VIFs
+  const conditionNumberFallback = Math.sqrt(maxVif) * 10;
+  const conditionNumber = realConditionNumber ?? conditionNumberFallback;
 
   // Breusch-Godfrey-type LM test (lag 1), computed from this model's stored
   // residuals: LM = (n-1) * R² of the auxiliary regression e_t on e_{t-1}.
@@ -420,11 +476,6 @@ export function DiagnosticsCenter() {
     }
   }
 
-  // White's General Test and Goldfeld-Quandt test both need the raw
-  // per-observation regressor matrix, which isn't stored on the saved model
-  // -- so we reconstruct it (with validation) from the dataset currently
-  // loaded in the workspace. See reconstructModelData() above for details.
-  const dataRecon = reconstructModelData(model, currentDataset);
   const whiteResult = computeWhiteTest(dataRecon);
   const gqResult = computeGoldfeldQuandtTest(dataRecon);
 
@@ -646,7 +697,11 @@ export function DiagnosticsCenter() {
                   <div className="bg-white p-5 border border-slate-200 rounded-lg space-y-2">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[#1a2744] font-mono">IV. Condition Number Audit</p>
                     <p className="text-xs text-slate-600 font-serif leading-relaxed">
-                      The condition number calculates eigenvalues of X'X. The computed condition number is <strong>{conditionNumber.toFixed(2)}</strong>. Values below 15 represent near-perfect orthogonality, confirming that standard errors are fully stable and unbiased by collinearity.
+                      {realConditionNumber !== null ? (
+                        <>The condition number is computed as the square root of the ratio of the largest to smallest eigenvalue of the standardized regressor correlation matrix. The computed condition number is <strong>{conditionNumber.toFixed(2)}</strong>. Values below 15 represent near-perfect orthogonality, confirming that standard errors are fully stable and unbiased by collinearity.</>
+                      ) : (
+                        <>The regressor matrix behind this model could not be reconstructed from the currently loaded dataset, so this is a rule-of-thumb estimate derived from the maximum VIF above (not an eigenvalue computation): <strong>{conditionNumber.toFixed(2)}</strong>. Load the original dataset for this model to get an exact eigenvalue-based condition number instead.</>
+                      )}
                     </p>
                   </div>
                   <div className="bg-white p-5 border border-slate-200 rounded-lg space-y-2">
