@@ -45,7 +45,13 @@ export default function RobustnessExplorer({ items, onClear }: RobustnessExplore
   const [isGeneratingStory, setIsGeneratingStory] = React.useState(false);
   const [story, setStory] = React.useState<string | null>(null);
 
-  // Auto-select variables if dataset changes
+  // Auto-select variables if dataset changes, and clear any prior run's
+  // specification-curve results - otherwise the coefficient chart, "N
+  // specifications evaluated" summary, and the AI narrative kept referring
+  // to the previous dataset's variables (e.g. still saying "the effect of
+  // wt on mpg" after switching to a dataset with no wt/mpg columns at all),
+  // with only the Y/X dropdowns silently resetting to show it's stale.
+  const currentDatasetKey = currentDataset?.name ?? null;
   React.useEffect(() => {
     if (currentDataset && currentDataset.data && currentDataset.data.length > 0) {
       const firstRow = currentDataset.data[0];
@@ -60,7 +66,10 @@ export default function RobustnessExplorer({ items, onClear }: RobustnessExplore
         }
       }
     }
-  }, [currentDataset]);
+    setCurveResults([]);
+    setAiSummary(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDatasetKey]);
 
   // Extract all numeric keys
   const numericColumns = React.useMemo(() => {
