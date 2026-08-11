@@ -41,7 +41,7 @@ export function CoefficientTranslator({ coefficients, yVar, xVars, modelType, is
     const xString = xVars.join(' + ');
     if (modelType === 'OLS') {
       return {
-        r: `model <- lm(${yVar} ~ ${xString}, data = df)\n${isRobust ? 'library(sandwich)\nlibrary(lmtest)\ncoeftest(model, vcov = vcovHC(model, type = "HC0"))' : 'summary(model)'}`,
+        r: `model <- lm(${yVar} ~ ${xString}, data = df)\n${isRobust ? 'library(sandwich)\nlibrary(lmtest)\ncoeftest(model, vcov = vcovHC(model, type = "HC1"))' : 'summary(model)'}`,
         stata: `regress ${yVar} ${xVars.join(' ')}${isRobust ? ', robust' : ''}`
       };
     } else if (modelType === 'FE') {
@@ -74,10 +74,12 @@ export function CoefficientTranslator({ coefficients, yVar, xVars, modelType, is
                 onClick={() => setActiveTab('text')}
                 className={cn("px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest rounded-md", activeTab === 'text' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500")}
               >Interpretation</button>
-              <button 
-                onClick={() => setActiveTab('code')}
-                className={cn("px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest rounded-md", activeTab === 'code' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500")}
-              >Replication Code</button>
+              {code && (
+                <button
+                  onClick={() => setActiveTab('code')}
+                  className={cn("px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest rounded-md", activeTab === 'code' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500")}
+                >Replication Code</button>
+              )}
            </div>
         </div>
         <div className="flex items-center gap-4">
