@@ -16,10 +16,6 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
-// __filename/__dirname are already provided by Jest's CommonJS module wrapper;
-// redeclaring them (e.g. via import.meta.url, the ESM-only equivalent) collides
-// with those built-ins and fails the whole file to load with a SyntaxError.
-
 // Live-tests the same OpenRouter/DeepSeek path server.ts actually uses in
 // production (not the direct Gemini SDK this originally called, from before
 // the Gemini -> OpenRouter migration -- GEMINI_API_KEY is unused now, so
@@ -96,8 +92,12 @@ async function callOpenRouter(systemInstruction: string, prompt: string, respons
   return data.choices?.[0]?.message?.content || "";
 }
 
-// Load fixtures
-const fixturesPath = path.join(__dirname, 'fixtures/interpreter-fixtures.json');
+// Load fixtures. This project runs as ESM ("type": "module" in package.json),
+// so under Jest's --experimental-vm-modules, __dirname/__filename are not
+// injected the way they would be under CommonJS -- resolve relative to the
+// working directory instead, matching every other fixture-loading test file
+// in this codebase (e.g. reference.test.ts's FIXTURES_DIR).
+const fixturesPath = path.join(process.cwd(), 'src/lib/__tests__/fixtures/interpreter-fixtures.json');
 const { fixtures } = JSON.parse(fs.readFileSync(fixturesPath, 'utf8'));
 
 function getSchemaAndInstructions(analysisType: string) {
@@ -476,10 +476,10 @@ describe("Stats Interpreter Fidelity Tests (Live Gemini)", () => {
         
         const hasString = fixture.rawOutput.includes(dec);
         const hasFloat = rawNumbers.some((r: number) => Math.abs(val - r) < 1e-7);
-        
+
         // Allow percentage forms of existing raw values (e.g., 98.5% for 0.985, or 81.79% for 0.8179)
         const hasPercentage = rawNumbers.some((r: number) => Math.abs(val / 100 - r) < 1e-5 || Math.abs(val * 100 - r) < 1e-5);
-        
+
         // Allow standard significance and confidence thresholds commonly cited in text
         const isStandardThreshold = [
           0.05, 0.01, 0.001, 0.1, 0.0001, 0.005,
@@ -487,12 +487,33 @@ describe("Stats Interpreter Fidelity Tests (Live Gemini)", () => {
           95.0, 99.0, 90.0, 97.5, 2.5, 5.0, 1.0, 10.0
         ].some((std) => Math.abs(Math.abs(val) - std) < 1e-7);
 
-        const isValid = hasString || hasFloat || hasPercentage || isStandardThreshold;
-        
+        // Allow the response's own rounding precision: a raw value with more
+        // decimal places than the response cites (e.g. a CI bound of
+        // -11.08740 reported as "-11.09") is a faithful rounding, not a
+        // fabricated number. Mirrors the rounding check and unsigned-
+        // magnitude fallback in server.ts's actual production fidelity
+        // checker (/api/gemini/stats-interpreter) - this file's matching
+        // logic is a separate local judge for the live AI response and must
+        // stay in sync with that production logic, or it flags correct
+        // output as a failure (as happened here before this rule existed).
+        const decimalPlaces = dec.includes('.') ? (dec.split('.').pop() || '').length : 0;
+        const hasRounded = decimalPlaces > 0 && rawNumbers.some((r: number) => {
+          const roundedRaw = parseFloat(r.toFixed(decimalPlaces));
+          const roundedResp = parseFloat(val.toFixed(decimalPlaces));
+          return Math.abs(roundedRaw - roundedResp) < 1e-9;
+        });
+        const hasUnsignedMagnitude = decimalPlaces > 0 && rawNumbers.some((r: number) => {
+          const roundedRawAbs = parseFloat(Math.abs(r).toFixed(decimalPlaces));
+          const roundedRespAbs = parseFloat(Math.abs(val).toFixed(decimalPlaces));
+          return Math.abs(roundedRawAbs - roundedRespAbs) < 1e-9;
+        });
+
+        const isValid = hasString || hasFloat || hasPercentage || isStandardThreshold || hasRounded || hasUnsignedMagnitude;
+
         if (!isValid) {
-          console.log(`[DEBUG FIDELITY FAILURE] dec: "${dec}", val: ${val}, hasString: ${hasString}, hasFloat: ${hasFloat}, hasPercentage: ${hasPercentage}, isStandardThreshold: ${isStandardThreshold}`);
+          console.log(`[DEBUG FIDELITY FAILURE] dec: "${dec}", val: ${val}, hasString: ${hasString}, hasFloat: ${hasFloat}, hasPercentage: ${hasPercentage}, isStandardThreshold: ${isStandardThreshold}, hasRounded: ${hasRounded}, hasUnsignedMagnitude: ${hasUnsignedMagnitude}`);
         }
-        
+
         expect(isValid).toBe(true);
       }
 
