@@ -71,10 +71,14 @@ export default function GLMLab({ dataset: propDataset, onRunComplete }: GLMLabPr
   React.useEffect(() => {
     // CRASH GUARD ADDED
     if ((numericVariables || []).length > 0) {
+      // Resolve the effective Y up front rather than reading the (possibly
+      // stale, not-yet-committed) `yVar` closure below - otherwise the X
+      // fallback can select the just-reset Y as one of its own regressors.
+      let effectiveYVar = yVar;
       if (!yVar || !(numericVariables || []).includes(yVar)) {
         // Find count or binary-looking variable or fallback to education or wage
-        const countVar = (numericVariables || []).find(v => v.includes('entity') || v === 'educ') || numericVariables[0] || '';
-        setYVar(countVar);
+        effectiveYVar = (numericVariables || []).find(v => v.includes('entity') || v === 'educ') || numericVariables[0] || '';
+        setYVar(effectiveYVar);
       }
       // Prune any selected X variables that no longer exist in the active
       // dataset (e.g. after switching datasets) - otherwise stale variable
@@ -82,9 +86,9 @@ export default function GLMLab({ dataset: propDataset, onRunComplete }: GLMLabPr
       // and listwise deletion in runPoissonMLE/runNegBinomialMLE drops every
       // row since the stale column never exists on the new data.
       setXVars(prev => {
-        const stillValid = (prev || []).filter(v => (numericVariables || []).includes(v));
+        const stillValid = (prev || []).filter(v => v !== effectiveYVar && (numericVariables || []).includes(v));
         if (stillValid.length > 0) return stillValid;
-        return (numericVariables || []).filter(v => v !== yVar).slice(0, 3);
+        return (numericVariables || []).filter(v => v !== effectiveYVar).slice(0, 3);
       });
     }
   }, [numericVariables]);
