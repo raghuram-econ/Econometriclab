@@ -66,6 +66,23 @@ export default function RegularizationLab() {
     });
   }, [currentDataset]);
 
+  // Reset selections and clear any prior run's results when the active
+  // dataset changes - otherwise depVar/indepVars silently keep referring to
+  // columns from the old dataset (invisible in the picker, which only lists
+  // the new dataset's columns), and the results table keeps showing the old
+  // dataset's numbers under the new "ACTIVE DATA" banner with no indication
+  // they're stale, since a failed re-run only shows a transient toast.
+  const datasetKey = currentDataset?.name ?? null;
+  React.useEffect(() => {
+    setDepVar('');
+    setIndepVars([]);
+    setEstimationResults(null);
+    setOlsResults(null);
+    setCvResultsData(null);
+    setOptimalLambda(null);
+    setCoefficientPath(null);
+  }, [datasetKey]);
+
   // Handle variable selection
   const handleIndepToggle = (v: string) => {
     if (indepVars.includes(v)) {
