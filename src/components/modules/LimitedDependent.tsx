@@ -356,6 +356,30 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
     }
   };
 
+  // Replication code for the Ordered tab must reproduce what the app
+  // actually fits: a sequence of independent binary logits at each
+  // cumulative cutpoint (see handleEstimateOrdered above), not a genuine
+  // proportional-odds ordered logit (Stata's ologit / R's MASS::polr) --
+  // those would NOT reproduce this module's own numbers.
+  const orderedReplicationCode = useMemo(() => {
+    if (!orderedResult) return null;
+    const xFormula = orderedPredictors.join(' + ');
+    const thresholds: number[] = (orderedResult.categories || []).slice(1);
+
+    const stata = thresholds.map(t =>
+      `gen binary_y_${t} = (${orderedOutcome} >= ${t})\nlogit binary_y_${t} ${orderedPredictors.join(' ')}`
+    ).join('\n\n');
+
+    const r = thresholds.map(t =>
+      `data$binary_y_${t} <- as.integer(data$${orderedOutcome} >= ${t})\nmodel_${t} <- glm(binary_y_${t} ~ ${xFormula}, data = data, family = binomial(link = "logit"))\nsummary(model_${t})`
+    ).join('\n\n');
+
+    return {
+      stata: `* Cumulative-threshold binary logit proxy (matches this app's own\n* "Ordered Logit" tab -- NOT a genuine proportional-odds ologit)\nuse "your_data.dta", clear\n\n${stata}`,
+      r: `# Cumulative-threshold binary logit proxy (matches this app's own\n# "Ordered Logit" tab -- NOT a genuine proportional-odds polr/ologit)\ndata <- read.csv("your_data.csv")\n\n${r}`
+    };
+  }, [orderedResult, orderedOutcome, orderedPredictors]);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-stone-200 pb-4">
@@ -932,6 +956,25 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                     ))}
                   </div>
                 </div>
+
+                {orderedReplicationCode && (
+                  <div className="bg-white border border-stone-200 rounded-2xl p-6 space-y-4">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-stone-900">Replication Code (Cutpoint Logit Proxies)</h3>
+                    <p className="text-xs text-stone-500 font-serif italic">
+                      This reproduces the app's actual cumulative-threshold binary logit method above -- a true ordered logit (Stata <span className="font-mono">ologit</span> / R <span className="font-mono">MASS::polr</span>) will NOT match these coefficients.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-stone-400">Stata (.do)</span>
+                        <pre className="mt-1 p-4 bg-slate-900 rounded-xl font-mono text-[11px] text-red-300 overflow-x-auto whitespace-pre-wrap">{orderedReplicationCode.stata}</pre>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-stone-400">R (.R)</span>
+                        <pre className="mt-1 p-4 bg-slate-900 rounded-xl font-mono text-[11px] text-blue-300 overflow-x-auto whitespace-pre-wrap">{orderedReplicationCode.r}</pre>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
