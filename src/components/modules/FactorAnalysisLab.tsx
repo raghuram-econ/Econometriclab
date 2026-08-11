@@ -152,12 +152,27 @@ export default function FactorAnalysisLab({ dataset: propDataset, onRunComplete 
   const [activeTab, setActiveTab] = useState<'selection' | 'scree' | 'loadings'>('selection');
 
   React.useEffect(() => {
-    if (numericVariables.length >= 3 && selectedVars.length === 0) {
-      // Select 4 default numeric traits
-      const defaults = numericVariables.filter(v => ['wage', 'educ', 'exper', 'gdp_growth', 'inflation', 'unemployment'].includes(v)).slice(0, 4);
-      setSelectedVars(defaults.length >= 3 ? defaults : numericVariables.slice(0, 4));
+    if (numericVariables.length >= 3) {
+      // Prune any selected variables that no longer exist in the active
+      // dataset (e.g. after switching datasets) - otherwise stale variable
+      // names silently survive with no checkbox to un-select them, since the
+      // picker only lists the current dataset's columns.
+      setSelectedVars(prev => {
+        const stillValid = prev.filter(v => numericVariables.includes(v));
+        if (stillValid.length > 0) return stillValid;
+        // Select 4 default numeric traits
+        const defaults = numericVariables.filter(v => ['wage', 'educ', 'exper', 'gdp_growth', 'inflation', 'unemployment'].includes(v)).slice(0, 4);
+        return defaults.length >= 3 ? defaults : numericVariables.slice(0, 4);
+      });
     }
   }, [numericVariables]);
+
+  // Clear stale results whenever the active dataset changes, so a previous
+  // dataset's factor loadings never linger on screen looking current.
+  const activeDatasetKey = activeDataset?.name ?? null;
+  React.useEffect(() => {
+    setResults(null);
+  }, [activeDatasetKey]);
 
   const handleToggleVar = (v: string) => {
     setSelectedVars(prev => prev.includes(v) ? prev.filter(item => item !== v) : [...prev, v]);

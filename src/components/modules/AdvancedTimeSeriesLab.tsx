@@ -132,13 +132,31 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
   }, [numericVariables]);
 
   React.useEffect(() => {
-    if (numericVariables.length >= 2 && cointVars.length === 0) {
-      setCointVars([
-        numericVariables.find(v => v === 'inflation') || numericVariables[0],
-        numericVariables.find(v => v === 'unemployment') || numericVariables[1]
-      ].filter(Boolean) as string[]);
+    if (numericVariables.length >= 2) {
+      // Prune any cointegration variables that no longer exist in the active
+      // dataset (e.g. after switching datasets) - otherwise stale variable
+      // names silently survive with no checkbox to un-select them, since the
+      // picker only lists the current dataset's columns.
+      setCointVars(prev => {
+        const stillValid = prev.filter(v => numericVariables.includes(v));
+        if (stillValid.length > 0) return stillValid;
+        return [
+          numericVariables.find(v => v === 'inflation') || numericVariables[0],
+          numericVariables.find(v => v === 'unemployment') || numericVariables[1]
+        ].filter(Boolean) as string[];
+      });
     }
   }, [numericVariables]);
+
+  // Clear stale results whenever the active dataset changes, so a previous
+  // dataset's coefficients/tests never linger on screen looking current.
+  const activeDatasetKey = activeDataset?.name ?? null;
+  React.useEffect(() => {
+    setResults(null);
+    setCointResults(null);
+    setEngleResults(null);
+    setCointError(null);
+  }, [activeDatasetKey]);
 
   const handleRunCointegration = async () => {
     if (!activeDataset || cointVars.length < 2) {

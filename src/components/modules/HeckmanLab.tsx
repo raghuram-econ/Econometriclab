@@ -82,16 +82,31 @@ export default function HeckmanLab({ dataset: propDataset, onRunComplete }: Heck
         const potentialS = numericVariables.find(v => v === 'employment') || numericVariables[1] || '';
         setSelectionS(potentialS);
       }
-      if (outcomeX.length === 0) {
+      // Prune any selected variables that no longer exist in the active
+      // dataset (e.g. after switching datasets) - otherwise stale variable
+      // names silently survive with no checkbox to un-select them, since the
+      // picker only lists the current dataset's columns.
+      setOutcomeX(prev => {
+        const stillValid = prev.filter(v => numericVariables.includes(v));
+        if (stillValid.length > 0) return stillValid;
         const potentialX = numericVariables.filter(v => v === 'educ' || v === 'exper' || v === 'female');
-        setOutcomeX(potentialX.length > 0 ? potentialX : [numericVariables[0] || '']);
-      }
-      if (exclusionZ.length === 0) {
-        const potentialZ = numericVariables.filter(v => v === 'distance_to_college' || v === 'urban');
-        setExclusionZ(potentialZ.length > 0 ? potentialZ : []);
-      }
+        return potentialX.length > 0 ? potentialX : [numericVariables[0] || ''];
+      });
+      setExclusionZ(prev => {
+        const stillValid = prev.filter(v => numericVariables.includes(v));
+        if (stillValid.length > 0) return stillValid;
+        return numericVariables.filter(v => v === 'distance_to_college' || v === 'urban');
+      });
     }
   }, [numericVariables]);
+
+  // Clear stale results whenever the active dataset changes, so a previous
+  // dataset's Heckman estimates never linger on screen looking current.
+  const activeDatasetKey = activeDataset?.name ?? null;
+  React.useEffect(() => {
+    setResults(null);
+    setErrorMessage(null);
+  }, [activeDatasetKey]);
 
   const handleToggleX = (v: string) => {
     setOutcomeX(prev => prev.includes(v) ? prev.filter(item => item !== v) : [...prev, v]);

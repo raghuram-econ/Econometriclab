@@ -62,6 +62,32 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
   const [isAutoSelecting, setIsAutoSelecting] = useState(false);
   const { teachingState, updateTeachingStep, history } = useStore();
 
+  const numericVarsForReset = React.useMemo(
+    () => (dataset?.variables || []).filter(v => v.type === 'numeric').map(v => v.name),
+    [dataset]
+  );
+
+  // Clear a stale target series when it no longer exists in the active
+  // dataset (e.g. after switching datasets) - otherwise targetVar silently
+  // keeps pointing at a column from the previous dataset (invisible in the
+  // picker, which only lists the new dataset's columns), producing an
+  // all-NaN series with no error shown rather than an obvious blank picker.
+  React.useEffect(() => {
+    if (targetVar && !numericVarsForReset.includes(targetVar)) {
+      setTargetVar('');
+    }
+  }, [numericVarsForReset]);
+
+  // Clear stale results whenever the active dataset changes, so a previous
+  // dataset's forecast never lingers on screen looking current.
+  const datasetKey = dataset?.name ?? null;
+  React.useEffect(() => {
+    setResults(null);
+    setPythonResult(null);
+    setError(null);
+    setPythonError(null);
+  }, [datasetKey]);
+
   if (!dataset) {
     return (
       <div className="h-96 flex flex-col items-center justify-center text-center border-2 border-dashed border-[#141414]/10">

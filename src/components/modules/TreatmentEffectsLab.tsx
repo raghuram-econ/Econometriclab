@@ -151,18 +151,38 @@ export default function TreatmentEffectsLab({ dataset: propDataset, onRunComplet
 
   React.useEffect(() => {
     if (numericVariables.length > 2) {
+      // Resolve the effective treat/outcome vars up front rather than reading
+      // the (possibly stale, not-yet-committed) closures below - otherwise the
+      // covariates fallback can select the just-reset treat/outcome vars as
+      // their own covariates.
+      let effectiveTreatVar = treatVar;
       if (!treatVar || !numericVariables.includes(treatVar)) {
-        setTreatVar(numericVariables.find(v => v === 'training' || v === 'female') || numericVariables[0] || '');
+        effectiveTreatVar = numericVariables.find(v => v === 'training' || v === 'female') || numericVariables[0] || '';
+        setTreatVar(effectiveTreatVar);
       }
+      let effectiveOutcomeVar = outcomeVar;
       if (!outcomeVar || !numericVariables.includes(outcomeVar)) {
-        setOutcomeVar(numericVariables.find(v => v === 'wage' || v === 'educ') || numericVariables[1] || '');
+        effectiveOutcomeVar = numericVariables.find(v => v === 'wage' || v === 'educ') || numericVariables[1] || '';
+        setOutcomeVar(effectiveOutcomeVar);
       }
-      if (covariates.length === 0) {
-        const potentialCovs = numericVariables.filter(v => v !== treatVar && v !== outcomeVar).slice(0, 3);
-        setCovariates(potentialCovs);
-      }
+      // Prune any selected covariates that no longer exist in the active
+      // dataset (e.g. after switching datasets) - otherwise stale variable
+      // names silently survive with no checkbox to un-select them, since the
+      // picker only lists the current dataset's columns.
+      setCovariates(prev => {
+        const stillValid = prev.filter(v => v !== effectiveTreatVar && v !== effectiveOutcomeVar && numericVariables.includes(v));
+        if (stillValid.length > 0) return stillValid;
+        return numericVariables.filter(v => v !== effectiveTreatVar && v !== effectiveOutcomeVar).slice(0, 3);
+      });
     }
   }, [numericVariables]);
+
+  // Clear stale results whenever the active dataset changes, so a previous
+  // dataset's treatment-effect estimates never linger on screen looking current.
+  const activeDatasetKey = activeDataset?.name ?? null;
+  React.useEffect(() => {
+    setResults(null);
+  }, [activeDatasetKey]);
 
   const handleToggleCov = (v: string) => {
     setCovariates(prev => prev.includes(v) ? prev.filter(item => item !== v) : [...prev, v]);

@@ -80,7 +80,22 @@ export default function SurvivalAnalysisLab({ dataset: propDataset, onRunComplet
         setEventVar(numericVariables.find(v => v === 'employment' || v === 'training') || numericVariables[1] || '');
       }
     }
+    // Prune any Cox PH covariates that no longer exist in the active dataset
+    // (e.g. after switching datasets) - otherwise stale variable names
+    // silently survive with no checkbox to un-select them, since the picker
+    // only lists the current dataset's columns.
+    setCoxCovars(prev => prev.filter(v => numericVariables.includes(v)));
   }, [numericVariables]);
+
+  // Clear stale results whenever the active dataset changes, so a previous
+  // dataset's survival curves/Cox estimates never linger on screen looking current.
+  const activeDatasetKey = activeDataset?.name ?? null;
+  React.useEffect(() => {
+    setResults(null);
+    setCoxResults(null);
+    setSurvivalError(null);
+    setCoxError(null);
+  }, [activeDatasetKey]);
 
   const handleRunSurvival = () => {
     if (!activeDataset || !timeVar || !eventVar) return;
