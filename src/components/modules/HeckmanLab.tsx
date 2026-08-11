@@ -101,11 +101,16 @@ export default function HeckmanLab({ dataset: propDataset, onRunComplete }: Heck
   }, [numericVariables]);
 
   // Clear stale results whenever the active dataset changes, so a previous
-  // dataset's Heckman estimates never linger on screen looking current.
+  // dataset's Heckman estimates never linger on screen looking current. Also
+  // reset activeTab back to 'estimation' - the 'results' tab button is
+  // disabled without `results`, but its content panel is still gated behind
+  // `results` too, so a user parked there during a dataset switch would
+  // otherwise see a blank tab until manually clicking away.
   const activeDatasetKey = activeDataset?.name ?? null;
   React.useEffect(() => {
     setResults(null);
     setErrorMessage(null);
+    setActiveTab('estimation');
   }, [activeDatasetKey]);
 
   const handleToggleX = (v: string) => {

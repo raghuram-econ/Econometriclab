@@ -168,10 +168,15 @@ export default function FactorAnalysisLab({ dataset: propDataset, onRunComplete 
   }, [numericVariables]);
 
   // Clear stale results whenever the active dataset changes, so a previous
-  // dataset's factor loadings never linger on screen looking current.
+  // dataset's factor loadings never linger on screen looking current. Also
+  // reset activeTab back to 'selection' - the Scree/Loadings tabs (and the
+  // tab switcher itself) only render when `results` is truthy, so clearing
+  // results while activeTab is still 'scree'/'loadings' left the page
+  // completely blank with no controls and no way back short of a reload.
   const activeDatasetKey = activeDataset?.name ?? null;
   React.useEffect(() => {
     setResults(null);
+    setActiveTab('selection');
   }, [activeDatasetKey]);
 
   const handleToggleVar = (v: string) => {

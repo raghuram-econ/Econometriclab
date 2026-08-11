@@ -93,6 +93,20 @@ export default function GLMLab({ dataset: propDataset, onRunComplete }: GLMLabPr
     }
   }, [numericVariables]);
 
+  // Clear stale results whenever the active dataset changes, so a previous
+  // dataset's coefficients never linger on screen looking current. Also
+  // reset activeTab back to 'estimation' - the tab switcher itself only
+  // renders when `results` is truthy, so clearing results while activeTab
+  // was still 'results'/'interpretation'/'ame' would leave the page blank
+  // with no controls and no way back short of a reload.
+  const activeDatasetKey = activeDataset?.name ?? null;
+  React.useEffect(() => {
+    setResults(null);
+    setActiveTab('estimation');
+    setAmeResults(null);
+    setAmeError(null);
+  }, [activeDatasetKey]);
+
   const handleToggleX = (v: string) => {
     // CRASH GUARD ADDED
     setXVars(prev => (prev || []).includes(v) ? (prev || []).filter(item => item !== v) : [...(prev || []), v]);

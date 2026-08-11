@@ -178,10 +178,15 @@ export default function TreatmentEffectsLab({ dataset: propDataset, onRunComplet
   }, [numericVariables]);
 
   // Clear stale results whenever the active dataset changes, so a previous
-  // dataset's treatment-effect estimates never linger on screen looking current.
+  // dataset's treatment-effect estimates never linger on screen looking
+  // current. Also reset activeTab back to 'estimation' - the tab switcher
+  // itself only renders when `results` is truthy, so clearing results while
+  // activeTab was still 'att'/'overlap'/'balance' would leave the page blank
+  // with no controls and no way back short of a reload.
   const activeDatasetKey = activeDataset?.name ?? null;
   React.useEffect(() => {
     setResults(null);
+    setActiveTab('estimation');
   }, [activeDatasetKey]);
 
   const handleToggleCov = (v: string) => {

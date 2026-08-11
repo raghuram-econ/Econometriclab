@@ -88,13 +88,18 @@ export default function SurvivalAnalysisLab({ dataset: propDataset, onRunComplet
   }, [numericVariables]);
 
   // Clear stale results whenever the active dataset changes, so a previous
-  // dataset's survival curves/Cox estimates never linger on screen looking current.
+  // dataset's survival curves/Cox estimates never linger on screen looking
+  // current. Also reset activeTab back to 'selection' - the tab switcher
+  // itself only renders when `results || coxResults` is truthy, so clearing
+  // both while activeTab was still 'curves'/'table'/'cox' would leave the
+  // page blank with no controls and no way back short of a reload.
   const activeDatasetKey = activeDataset?.name ?? null;
   React.useEffect(() => {
     setResults(null);
     setCoxResults(null);
     setSurvivalError(null);
     setCoxError(null);
+    setActiveTab('selection');
   }, [activeDatasetKey]);
 
   const handleRunSurvival = () => {

@@ -150,12 +150,18 @@ export default function AdvancedTimeSeriesLab({ dataset: propDataset, onRunCompl
 
   // Clear stale results whenever the active dataset changes, so a previous
   // dataset's coefficients/tests never linger on screen looking current.
+  // Also reset activeTab back to 'estimation' - the 'results'/'irf' tab
+  // buttons are individually disabled without `results`, but their content
+  // panels are still gated behind `results` too, so a user parked there
+  // during a dataset switch would otherwise see a blank tab until manually
+  // clicking away.
   const activeDatasetKey = activeDataset?.name ?? null;
   React.useEffect(() => {
     setResults(null);
     setCointResults(null);
     setEngleResults(null);
     setCointError(null);
+    setActiveTab('estimation');
   }, [activeDatasetKey]);
 
   const handleRunCointegration = async () => {
