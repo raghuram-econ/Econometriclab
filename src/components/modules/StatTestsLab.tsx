@@ -69,13 +69,25 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
   // Automatically pick a variable when dataset is loaded
   React.useEffect(() => {
     if (numericVariables.length > 0) {
+      // Resolve the effective Y up front rather than reading the (possibly
+      // stale, not-yet-committed) `selectedVar` closure below - otherwise X
+      // can be left equal to the just-reset Y.
+      let effectiveVar = selectedVar;
       if (!selectedVar || !numericVariables.includes(selectedVar)) {
-        const first = numericVariables[0];
-        if (first) setSelectedVar(first);
+        effectiveVar = numericVariables[0] || '';
+        if (effectiveVar) setSelectedVar(effectiveVar);
       }
-      if (numericVariables.length > 1 && (!selectedVarX || !numericVariables.includes(selectedVarX))) {
-        const second = numericVariables[1];
-        if (second) setSelectedVarX(second);
+      // Also re-pick X whenever it collides with Y (e.g. the user changes Y
+      // to the variable X was already set to) - not just when X no longer
+      // exists in the dataset. The X dropdown's option list always excludes
+      // the current Y, so a stale X === Y silently desyncs the visible
+      // dropdown (which falls back to displaying its first remaining option)
+      // from the real X state, and Ramsey RESET then fails with a confusing
+      // "select a different X" error despite the dropdown showing two
+      // different-looking selections.
+      if (numericVariables.length > 1 && (!selectedVarX || selectedVarX === effectiveVar || !numericVariables.includes(selectedVarX))) {
+        const fallback = numericVariables.find(v => v !== effectiveVar);
+        if (fallback) setSelectedVarX(fallback);
       }
     }
   }, [numericVariables, selectedVar, selectedVarX]);
@@ -355,6 +367,28 @@ export default function StatTestsLab({ dataset: propDataset, onRunComplete }: St
                       <option key={v} value={v}>{v}</option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {(testType === 'stationarity' || testType === 'kpss' || testType === 'phillips') && !researchGrade && (
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-stone-700">3. Lag Length</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    step={1}
+                    value={lagLength}
+                    onChange={(e) => {
+                      const parsed = parseInt(e.target.value, 10);
+                      setLagLength(Number.isFinite(parsed) ? Math.max(0, Math.min(20, parsed)) : 0);
+                      setTestResult(null);
+                    }}
+                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2.5 text-xs text-stone-800 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <p className="text-[10px] text-stone-400 leading-relaxed">
+                    Number of lagged difference terms (ADF) or truncation lags (KPSS/PP) used by the fast browser engine. Too few lags can leave residual autocorrelation and bias the test; switch to the Research-grade Python engine below for automatic AIC/auto lag selection instead of guessing.
+                  </p>
                 </div>
               )}
 
