@@ -500,18 +500,16 @@ export default function GLMLab({ dataset: propDataset, onRunComplete }: GLMLabPr
                 </div>
               </div>
 
-              {(family === 'logit' || family === 'probit') && (
-                <div className="pt-4 border-t border-stone-100">
-                  <ShowCode 
-                    parameters={{
-                      modelType: family,
-                      yVariable: yVar,
-                      xVariables: xVars,
-                      options: {}
-                    }}
-                  />
-                </div>
-              )}
+              <div className="pt-4 border-t border-stone-100">
+                <ShowCode
+                  parameters={{
+                    modelType: family,
+                    yVariable: yVar,
+                    xVariables: xVars,
+                    options: {}
+                  }}
+                />
+              </div>
             </div>
           )}
 

@@ -804,6 +804,15 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                     </table>
                   </div>
                 </div>
+
+                <ShowCode
+                  parameters={{
+                    modelType: "tobit",
+                    yVariable: tobitOutcome,
+                    xVariables: tobitPredictors,
+                    options: { cutoff: tobitResult.cutoff }
+                  }}
+                />
               </div>
             )}
           </div>

@@ -4,7 +4,7 @@ import { cn } from '../../lib/utils';
 
 export interface ShowCodeProps {
   parameters: {
-    modelType: "ols" | "logit" | "probit" | "panel_fe" | "panel_re" | "iv" | "arima" | "survival_cox";
+    modelType: "ols" | "logit" | "probit" | "panel_fe" | "panel_re" | "iv" | "arima" | "survival_cox" | "poisson" | "negbin" | "tobit";
     yVariable: string;
     xVariables: string[];
     options?: {
@@ -15,6 +15,7 @@ export interface ShowCodeProps {
       timeId?: string;
       instruments?: string[];
       orders?: [number, number, number]; // [p, d, q] for ARIMA
+      cutoff?: number; // left-censoring point for Tobit
     };
   };
 }
@@ -33,6 +34,7 @@ export default function ShowCode({ parameters }: ShowCodeProps) {
   const timeId = options.timeId || 'time';
   const instruments = options.instruments || ['z1', 'z2'];
   const orders = options.orders || [1, 1, 1];
+  const cutoff = options.cutoff ?? 0;
 
   // Helper to escape and highlight keywords with custom Tailwind classes
   const highlightCode = (code: string, language: 'stata' | 'r' | 'python') => {
@@ -43,16 +45,16 @@ export default function ShowCode({ parameters }: ShowCodeProps) {
 
     if (language === 'stata') {
       // Command names
-      const cmds = /\b(use|clear|regress|estimates|store|esttab|logit|probit|xtset|xtreg|ivregress|2sls|arima|stcox|stset|tsset)\b/g;
+      const cmds = /\b(use|clear|regress|estimates|store|esttab|logit|probit|xtset|xtreg|ivregress|2sls|arima|stcox|stset|tsset|poisson|nbreg|tobit)\b/g;
       escaped = escaped.replace(cmds, '<span class="text-[#60a5fa] font-semibold">$1</span>');
       // Options and sub-parameters
-      const opts = /\b(vce|robust|cluster|fe|re|order|se|star|pr2|failure)\b/g;
+      const opts = /\b(vce|robust|cluster|fe|re|order|se|star|pr2|failure|ll)\b/g;
       escaped = escaped.replace(opts, '<span class="text-[#c084fc]">$1</span>');
       // Comments
       escaped = escaped.replace(/^(\s*\*.*)$/gm, '<span class="text-stone-500 italic">$1</span>');
     } else if (language === 'r') {
       // R commands/functions
-      const cmds = /\b(library|read\.csv|feols|modelsummary|lm|coeftest|vcovHC|glm|Arima|coxph|Surv|plm|ts|summary|binomial|as\.formula)\b/g;
+      const cmds = /\b(library|read\.csv|feols|modelsummary|lm|coeftest|vcovHC|glm|glm\.nb|tobit|Arima|coxph|Surv|plm|ts|summary|binomial|poisson|as\.formula)\b/g;
       escaped = escaped.replace(cmds, '<span class="text-[#c084fc] font-semibold">$1</span>');
       // Comments
       escaped = escaped.replace(/(#.*)$/gm, '<span class="text-stone-500 italic">$1</span>');
@@ -64,7 +66,7 @@ export default function ShowCode({ parameters }: ShowCodeProps) {
       const keywords = /\b(import|as|from|print|def|return|class|if|else|elif|in|for|while)\b/g;
       escaped = escaped.replace(keywords, '<span class="text-[#34d399] font-semibold">$1</span>');
       // Classes & stats models calls
-      const funcs = /\b(add_constant|OLS|Logit|Probit|PanelOLS|RandomEffects|IV2SLS|ARIMA|CoxPHFitter|fit|summary|read_csv|set_index|print_summary)\b/g;
+      const funcs = /\b(add_constant|OLS|Logit|Probit|PanelOLS|RandomEffects|IV2SLS|ARIMA|CoxPHFitter|GLM|Poisson|NegativeBinomial|families|fit|summary|read_csv|set_index|print_summary)\b/g;
       escaped = escaped.replace(funcs, '<span class="text-[#38bdf8] font-semibold">$1</span>');
       // Comments
       escaped = escaped.replace(/(#.*)$/gm, '<span class="text-stone-500 italic">$1</span>');
@@ -163,6 +165,39 @@ stset ${y}, failure(${timeId})
 
 * 3. Estimate Cox Proportional Hazards Model
 stcox ${xVars.join(' ')}`;
+
+      case 'poisson':
+        return `* 1. Load dataset
+use "your_data.dta", clear
+
+* 2. Run Poisson Regression (count outcome, log link)
+poisson ${y} ${xVars.join(' ')}${vceOption}
+
+* 3. Export estimates (coefficients are on the log-count scale)
+estimates store model_poisson
+esttab model_poisson, se star(* 0.10 ** 0.05 *** 0.01) b(%8.4f) se(%8.4f)`;
+
+      case 'negbin':
+        return `* 1. Load dataset
+use "your_data.dta", clear
+
+* 2. Run Negative Binomial Regression (handles overdispersion vs Poisson)
+nbreg ${y} ${xVars.join(' ')}${vceOption}
+
+* 3. Export estimates
+estimates store model_negbin
+esttab model_negbin, se star(* 0.10 ** 0.05 *** 0.01) b(%8.4f) se(%8.4f)`;
+
+      case 'tobit':
+        return `* 1. Load dataset
+use "your_data.dta", clear
+
+* 2. Estimate Type I Tobit, left-censored at ${cutoff}
+tobit ${y} ${xVars.join(' ')}, ll(${cutoff})
+
+* 3. Export estimates
+estimates store model_tobit
+esttab model_tobit, se star(* 0.10 ** 0.05 *** 0.01) b(%8.4f) se(%8.4f)`;
 
       default:
         return '';
@@ -289,6 +324,47 @@ model <- coxph(Surv(${y}, ${timeId}) ~ ${xFormula}, data = data)
 
 # 4. Print Hazard Ratios and coefficients
 summary(model)`;
+
+      case 'poisson':
+        return `# 1. Load modelsummary library
+library(modelsummary)
+
+# 2. Read dataset
+data <- read.csv("your_data.csv")
+
+# 3. Estimate Poisson Regression (count outcome, log link)
+model <- glm(${y} ~ ${xFormula}, family = poisson(link = "log"), data = data)
+
+# 4. Display results with stars
+modelsummary(model, stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01))`;
+
+      case 'negbin':
+        return `# 1. Load MASS (glm.nb) and modelsummary libraries
+library(MASS)
+library(modelsummary)
+
+# 2. Read dataset
+data <- read.csv("your_data.csv")
+
+# 3. Estimate Negative Binomial Regression (handles overdispersion vs Poisson)
+model <- glm.nb(${y} ~ ${xFormula}, data = data)
+
+# 4. Display results with stars
+modelsummary(model, stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01))`;
+
+      case 'tobit':
+        return `# 1. Load AER (tobit) and modelsummary libraries
+library(AER)
+library(modelsummary)
+
+# 2. Read dataset
+data <- read.csv("your_data.csv")
+
+# 3. Estimate Type I Tobit, left-censored at ${cutoff}
+model <- tobit(${y} ~ ${xFormula}, left = ${cutoff}, data = data)
+
+# 4. Display results with stars
+modelsummary(model, stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01))`;
 
       default:
         return '';
@@ -461,6 +537,50 @@ cph.fit(subset_df, duration_col='${y}', event_col='${timeId}')
 
 # 5. Display coefficients & Hazard Ratios (exp(coef))
 cph.print_summary()`;
+
+      case 'poisson':
+        return `# 1. Load statsmodels GLM module
+import pandas as pd
+import statsmodels.api as sm
+
+# 2. Load dataset
+df = pd.read_csv("your_data.csv")
+
+# 3. Setup matrices
+Y = df['${y}']
+X = sm.add_constant(df[[${xList}]])
+
+# 4. Estimate Poisson Regression (count outcome, log link)
+model = sm.GLM(Y, X, family=sm.families.Poisson())
+results = model.fit()
+
+# 5. Display stats summary
+print(results.summary())`;
+
+      case 'negbin':
+        return `# 1. Load statsmodels GLM module
+import pandas as pd
+import statsmodels.api as sm
+
+# 2. Load dataset
+df = pd.read_csv("your_data.csv")
+
+# 3. Setup matrices
+Y = df['${y}']
+X = sm.add_constant(df[[${xList}]])
+
+# 4. Estimate Negative Binomial Regression (handles overdispersion vs Poisson)
+model = sm.GLM(Y, X, family=sm.families.NegativeBinomial())
+results = model.fit()
+
+# 5. Display stats summary
+print(results.summary())`;
+
+      case 'tobit':
+        return `# statsmodels has no built-in Tobit estimator (unlike R's AER::tobit or
+# Stata's tobit command). Use the R or Stata tab for a directly reproducing
+# implementation, or fit a custom censored-normal MLE via
+# statsmodels.base.model.GenericLikelihoodModel.`;
 
       default:
         return '';
