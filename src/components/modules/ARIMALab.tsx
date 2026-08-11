@@ -60,6 +60,7 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
   const [isPythonRunning, setIsPythonRunning] = useState(false);
   const [pythonError, setPythonError] = useState<string | null>(null);
   const [isAutoSelecting, setIsAutoSelecting] = useState(false);
+  const { teachingState, updateTeachingStep, history } = useStore();
 
   if (!dataset) {
     return (
@@ -90,7 +91,6 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
     }, 100);
   };
 
-  const { teachingState, updateTeachingStep, history } = useStore();
   const activeHistoryItem = history.find(h => h.results === results);
 
   const handleDownloadForecast = () => {
