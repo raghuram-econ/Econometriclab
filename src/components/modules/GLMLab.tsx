@@ -76,12 +76,16 @@ export default function GLMLab({ dataset: propDataset, onRunComplete }: GLMLabPr
         const countVar = (numericVariables || []).find(v => v.includes('entity') || v === 'educ') || numericVariables[0] || '';
         setYVar(countVar);
       }
-      // CRASH GUARD ADDED
-      if ((xVars || []).length === 0) {
-        // CRASH GUARD ADDED
-        const potentialX = (numericVariables || []).filter(v => v !== yVar).slice(0, 3);
-        setXVars(potentialX);
-      }
+      // Prune any selected X variables that no longer exist in the active
+      // dataset (e.g. after switching datasets) - otherwise stale variable
+      // names silently survive in state with no checkbox to un-select them,
+      // and listwise deletion in runPoissonMLE/runNegBinomialMLE drops every
+      // row since the stale column never exists on the new data.
+      setXVars(prev => {
+        const stillValid = (prev || []).filter(v => (numericVariables || []).includes(v));
+        if (stillValid.length > 0) return stillValid;
+        return (numericVariables || []).filter(v => v !== yVar).slice(0, 3);
+      });
     }
   }, [numericVariables]);
 
