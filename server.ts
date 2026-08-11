@@ -740,7 +740,8 @@ async function startServer() {
     const xs = h.results?.xVars || h.results?.coefficients?.map((c: any) => c.variable).filter((v: string) => v !== "Intercept" && v !== "Intercept (FE)") || [];
     const robust = h.results?.robust || false;
     const clusterVar = h.results?.clusterVar;
-    
+    const robustType = h.results?.robustType || "HC1";
+
     let code = `\n# --- Model ${index + 1}: ${h.specification} ---\n`;
     code += `print("Running Model ${index + 1}...")\n`;
     
@@ -769,7 +770,7 @@ async function startServer() {
       } else if (robust) {
         code += `library(sandwich)\n`;
         code += `library(lmtest)\n`;
-        code += `print(coeftest(fit_${index + 1}, vcov. = vcovHC(fit_${index + 1}, type = "HC1")))\n`;
+        code += `print(coeftest(fit_${index + 1}, vcov. = vcovHC(fit_${index + 1}, type = "${robustType}")))\n`;
       } else {
         code += `print(summary(fit_${index + 1}))\n`;
       }
@@ -782,7 +783,8 @@ async function startServer() {
     const xs = h.results?.xVars || h.results?.coefficients?.map((c: any) => c.variable).filter((v: string) => v !== "Intercept" && v !== "Intercept (FE)") || [];
     const robust = h.results?.robust || false;
     const clusterVar = h.results?.clusterVar;
-    
+    const robustType = h.results?.robustType || "HC1";
+
     let code = `\n* --- Model ${index + 1}: ${h.specification} ---\n`;
     code += `preserve\n`;
     
@@ -800,7 +802,13 @@ async function startServer() {
       if (clusterVar) {
         opts = `, vce(cluster ${clusterVar})`;
       } else if (robust) {
-        opts = `, robust`;
+        // Stata's regress has no native HC0 option (vce(robust)/, robust applies
+        // the n/(n-k) small-sample correction, i.e. HC1); hc2/hc3 are separately
+        // supported vcetype values.
+        if (robustType === "HC2") opts = `, vce(hc2)`;
+        else if (robustType === "HC3") opts = `, vce(hc3)`;
+        else if (robustType === "HC0") opts = `, robust  // Note: Stata has no native HC0 for regress; this is HC1, not HC0`;
+        else opts = `, robust`;
       }
       code += `regress ${varList}${opts}\n`;
     }

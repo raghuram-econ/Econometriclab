@@ -12,6 +12,7 @@ interface CodeBridgeProps {
     entity?: string;
     time?: string;
     orders?: [number, number, number];
+    seType?: 'HC0' | 'HC1' | 'HC2' | 'HC3';
   };
 }
 
@@ -34,7 +35,15 @@ export const CodeBridge: React.FC<CodeBridgeProps> = ({ modelType, yVar, xVars, 
       case 'ols':
         let cmd = `regress ${yVar} ${xVars.join(' ')}`;
         if (options?.cluster) cmd += `, vce(cluster ${options.cluster})`;
-        else if (options?.robust) cmd += `, vce(robust)`;
+        else if (options?.robust) {
+          // Stata's regress has no native HC0 option (vce(robust) applies
+          // the n/(n-k) small-sample correction, i.e. HC1); hc2/hc3 are
+          // separately supported vcetype values.
+          if (options.seType === 'HC2') cmd += `, vce(hc2)`;
+          else if (options.seType === 'HC3') cmd += `, vce(hc3)`;
+          else if (options.seType === 'HC0') cmd += `, vce(robust)  // Note: Stata has no native HC0 for regress; vce(robust) here is HC1, not HC0`;
+          else cmd += `, vce(robust)`;
+        }
         return cmd;
       case 'fe':
         let feCmd = `xtset ${options?.entity} ${options?.time}\nxtreg ${yVar} ${xVars.join(' ')}, fe`;
@@ -55,7 +64,8 @@ export const CodeBridge: React.FC<CodeBridgeProps> = ({ modelType, yVar, xVars, 
         if (options?.cluster) {
           cmd += `\n# Using sandwich package for clustered SEs\nlibrary(sandwich)\nlibrary(lmtest)\ncoeftest(model, vcov = vcovCL(model, cluster = ~${options.cluster}))`;
         } else if (options?.robust) {
-          cmd += `\n# Using sandwich package for robust SEs\nlibrary(sandwich)\nlibrary(lmtest)\ncoeftest(model, vcov = vcovHC(model, type = "HC1"))`;
+          const hcType = options.seType || 'HC1';
+          cmd += `\n# Using sandwich package for robust SEs\nlibrary(sandwich)\nlibrary(lmtest)\ncoeftest(model, vcov = vcovHC(model, type = "${hcType}"))`;
         }
         return cmd;
       case 'fe':
@@ -75,7 +85,7 @@ export const CodeBridge: React.FC<CodeBridgeProps> = ({ modelType, yVar, xVars, 
         const xList = xVars.map(v => `'${v}'`).join(', ');
         let code = `import statsmodels.api as sm\n\nY = df['${yVar}']\nX = df[[${xList}]]\nX = sm.add_constant(X)\n\nmodel = sm.OLS(Y, X)\n`;
         if (options?.cluster) code += `results = model.fit(cov_type='cluster', cov_kwds={'groups': df['${options.cluster}']})`;
-        else if (options?.robust) code += `results = model.fit(cov_type='HC1')`;
+        else if (options?.robust) code += `results = model.fit(cov_type='${options.seType || 'HC1'}')`;
         else code += `results = model.fit()`;
         code += `\nprint(results.summary())`;
         return code;

@@ -96,8 +96,9 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
 
   const codeBridgeOptions = useMemo(() => ({
     robust: useRobust,
-    cluster: resultsTableClusterVar
-  }), [useRobust, resultsTableClusterVar]);
+    cluster: resultsTableClusterVar,
+    seType: (seEstimator === 'HC0' || seEstimator === 'HC1' || seEstimator === 'HC2' || seEstimator === 'HC3') ? seEstimator : undefined
+  }), [useRobust, resultsTableClusterVar, seEstimator]);
 
   const [estimationResults, setEstimationResults] = useState<any>(null);
   const [isEstimating, setIsEstimating] = useState(false);
