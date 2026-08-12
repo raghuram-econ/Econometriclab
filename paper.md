@@ -88,4 +88,26 @@ Lab occupies the remaining gap: zero-install, browser-based access to an
 econometrics-specific estimator suite that pairs guided interpretation with
 verified-fidelity replication-code export in the same interface.
 
+# AI usage disclosure
+
+Generative AI (Claude, Anthropic; models Claude Opus 4.8 and Claude Sonnet 5, used
+through the Claude Code CLI) assisted with this project's source code, tests, and this
+paper's text. Its use spanned code generation for new estimator modules and UI
+components, refactoring, writing and extending the automated test suite (including
+reference computations checked against `statsmodels`, `R`, and published worked
+examples), bug fixes, drafting and editing project documentation (README, CONTRIBUTING,
+this paper), and copy-editing. It was not used for the live in-app "AI-generated
+interpretation" feature described in the Summary, which is a runtime product feature
+calling a large language model at user request, distinct from AI assistance in building
+the software itself.
+
+The author (Raghuram M) directed all development, made every design and architectural
+decision (estimator selection and scope, which methods are simplified relative to their
+canonical form and why, the replication-code fidelity requirement described above, and
+what belongs in this paper), and reviewed, tested, and validated all AI-assisted code
+and text before it was committed -- including independently verifying numerical results
+against external references rather than accepting AI-generated code on the basis of
+plausibility alone. No conversational AI was used in the review process itself; this
+disclosure covers only development- and writing-time assistance.
+
 # References
