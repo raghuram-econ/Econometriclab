@@ -1,7 +1,13 @@
 {
-  "name": "react-example",
-  "private": true,
-  "version": "0.0.0",
+  "name": "econometrics-lab",
+  "private": false,
+  "version": "1.0.0",
+  "description": "A browser-based econometrics workbench for teaching and research: OLS through dynamic-panel GMM and synthetic control, with AI-guided interpretation, NIST-certified numerics, and Stata/R/Python replication-code export.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chubbyboy00o76-boop/Econometriclab.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",

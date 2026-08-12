@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Econometrics Lab: A Browser-Based Workbench for Teaching and Research in Applied Econometrics"
+type: software
+version: 1.0.0
+date-released: "2026-08-12"
+authors:
+  - given-names: "Raghuram"
+    family-names: "M"
+    affiliation: "Bharathiar University, India"
+    orcid: "https://orcid.org/0009-0000-0031-0525"
+repository-code: "https://github.com/chubbyboy00o76-boop/Econometriclab"
+url: "https://econometrics-lab.onrender.com"
+license: MIT
+keywords:
+  - econometrics
+  - education
+  - reproducibility
+  - statistics
+  - open-source software
+# Once the JOSS paper is accepted, add a `preferred-citation` block here pointing to
+# the paper's DOI, per https://citation-file-format.github.io/
