@@ -1,7 +1,7 @@
 {
   "name": "econometrics-lab",
   "private": false,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A browser-based econometrics workbench for teaching and research: OLS through dynamic-panel GMM and synthetic control, with AI-guided interpretation, NIST-certified numerics, and Stata/R/Python replication-code export.",
   "license": "MIT",
   "repository": {
