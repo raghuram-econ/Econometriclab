@@ -9,12 +9,10 @@ Live app: https://econometrics-lab.onrender.com
 
 ## For reviewers
 
-Most estimators (OLS, Panel FE/RE, IV/2SLS, GLM, ARIMA/VAR/GARCH, Tobit, Heckman,
-sharp/fuzzy RD via the browser engine, etc.) work immediately via "Continue as Guest" on
-the live app, no account needed. A handful of estimators that run on the Python backend
-(dynamic-panel GMM, Synthetic Control, Staggered DiD, and the `rdrobust`-equivalent
-research-grade RD path) require signing in. A reviewer account with access to those is
-available on request — see the JOSS review thread, or open an issue.
+Click "Continue as Guest" on the live app — no account needed. The full estimator
+suite, including the Python-backend estimators (dynamic-panel GMM, Synthetic Control,
+Staggered DiD, and the `rdrobust`-equivalent research-grade RD path), is available in
+guest mode.
 
 ## What it does
 
@@ -55,8 +53,7 @@ Run only one side with `npm run dev` (Node) or `npm run dev:python` (Python).
 Most estimators run entirely client-side and need no API keys. AI interpretation needs
 `OPENROUTER_API_KEY`; a few Python-backend estimators (research-grade RD, GMM, Synthetic
 Control, Staggered DiD) need the Python backend running locally or `PYTHON_BACKEND_URL`
-pointed at one, and additionally require an authenticated (non-guest) session — see
-[CONTRIBUTING.md](CONTRIBUTING.md) for local auth setup.
+pointed at one.
 
 ## Testing
 

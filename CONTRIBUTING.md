@@ -13,12 +13,10 @@ cp .env.example .env.local   # fill in keys as needed, see comments in the file
 npm run dev:all
 ```
 
-Guest mode covers most estimators without any keys. A few Python-backend estimators
-(research-grade RD, GMM, Synthetic Control, Staggered DiD) require an authenticated
-session, gated by Firebase — to exercise those locally, fill in the `VITE_FIREBASE_*`
-variables in `.env.local` with credentials from your own Firebase project (see
-comments in `.env.example`) and sign in through the app instead of using "Continue as
-Guest."
+Guest mode covers the full estimator suite without any keys. A few Python-backend
+estimators (research-grade RD, GMM, Synthetic Control, Staggered DiD) additionally need
+the Python backend running locally (`npm run dev:python`) or `PYTHON_BACKEND_URL`
+pointed at one.
 
 ## Before opening a pull request
 

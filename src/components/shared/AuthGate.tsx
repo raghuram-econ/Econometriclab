@@ -5,49 +5,20 @@ import {
   Sparkles,
   FileText,
   ShieldCheck,
-  LogIn,
   TrendingUp,
-  AlertCircle,
-  ExternalLink,
   User as UserIcon
 } from "lucide-react";
-import { signInWithGoogle, signInAsGuest } from "../../services/authService";
+import { signInAsGuest } from "../../services/authService";
 import { useStore } from "../../store/useStore";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { isHydrated, user, setMockUser } = useStore();
-  const [isSigningIn, setIsSigningIn] = useState(false);
   const [isSigningInGuest, setIsSigningInGuest] = useState(false);
   const [error, setError] = useState("");
-  const [isPopupBlocked, setIsPopupBlocked] = useState(false);
-
-  const handleSignIn = async () => {
-    setIsSigningIn(true);
-    setError("");
-    setIsPopupBlocked(false);
-    try {
-      await signInWithGoogle();
-    } catch (e: any) {
-      if (
-        e?.code === "auth/popup-blocked" || 
-        e?.message?.includes("popup-blocked") || 
-        e?.message?.includes("popup blocked") ||
-        e?.message?.includes("auth/popup-closed-by-user") === false
-      ) {
-        setIsPopupBlocked(true);
-        setError("Sign-in popup was blocked by your browser.");
-      } else {
-        setError(e.message || "Sign-in failed.");
-      }
-    } finally {
-      setIsSigningIn(false);
-    }
-  };
 
   const handleSignInGuest = async () => {
     setIsSigningInGuest(true);
     setError("");
-    setIsPopupBlocked(false);
     try {
       const guestUser = await signInAsGuest();
       setMockUser(guestUser);
@@ -177,79 +148,26 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             Free for MA, MPhil & PhD Scholars.
           </p>
 
-          {error && !isPopupBlocked && <p className="text-red-500 text-xs mb-4">{error}</p>}
+          {error && <p className="text-red-500 text-xs mb-4">{error}</p>}
 
-          {/* Special popup-blocked info block */}
-          {isPopupBlocked && (
-            <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex flex-col gap-3 text-slate-800 animate-in fade-in duration-200">
-              <div className="flex gap-2 items-start">
-                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                <div className="text-xs">
-                  <p className="font-bold text-amber-900">Sign-In Popup Blocked</p>
-                  <p className="text-amber-700 mt-1 leading-relaxed">
-                    Your browser or the sandboxed preview iframe blocked the Google login popup. Choose an option to proceed:
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-col gap-2">
-                <a 
-                  href={window.location.href} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Open App in New Tab
-                </a>
-                <button
-                  type="button"
-                  onClick={handleSignInGuest}
-                  disabled={isSigningInGuest}
-                  className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs disabled:opacity-50"
-                >
-                  <UserIcon className="w-3.5 h-3.5" />
-                  {isSigningInGuest ? "Launching..." : "Continue as Guest (Local Sandbox)"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          
-          {/* Google Sign-in button (primary) */}
-          {!isPopupBlocked && (
-            <motion.button
-              onClick={handleSignIn}
-              disabled={isSigningIn || isSigningInGuest}
-              className="w-full flex items-center justify-center gap-2 bg-slate-900 border border-slate-900 rounded-xl py-3 px-4 text-white font-semibold text-xs hover:bg-slate-800 transition-all duration-200 disabled:opacity-50 mb-3"
-              initial={{ scale: 0.97 }}
-              animate={{ scale: 1 }}
-              transition={{ delay: 0.5, type: "spring", stiffness: 300 }}
-            >
-              <LogIn className="w-4 h-4" />
-              {isSigningIn ? "Signing in..." : "Continue with Google"}
-            </motion.button>
-          )}
-
-          {/* Guest Sign-in button (secondary) */}
-          {!isPopupBlocked && (
-            <motion.button
-              onClick={handleSignInGuest}
-              disabled={isSigningIn || isSigningInGuest}
-              className="w-full flex items-center justify-center gap-2 bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-slate-700 font-medium text-xs hover:bg-slate-100 hover:border-slate-300 transition-all duration-200 disabled:opacity-50 mb-6"
-              initial={{ scale: 0.97 }}
-              animate={{ scale: 1 }}
-              transition={{ delay: 0.6, type: "spring", stiffness: 300 }}
-            >
-              <UserIcon className="w-4 h-4 text-slate-500" />
-              {isSigningInGuest ? "Launching Sandbox..." : "Continue as Guest (Local Sandbox)"}
-            </motion.button>
-          )}
+          {/* Guest Sign-in button */}
+          <motion.button
+            onClick={handleSignInGuest}
+            disabled={isSigningInGuest}
+            className="w-full flex items-center justify-center gap-2 bg-slate-900 border border-slate-900 rounded-xl py-3 px-4 text-white font-semibold text-xs hover:bg-slate-800 transition-all duration-200 disabled:opacity-50 mb-6"
+            initial={{ scale: 0.97 }}
+            animate={{ scale: 1 }}
+            transition={{ delay: 0.5, type: "spring", stiffness: 300 }}
+          >
+            <UserIcon className="w-4 h-4" />
+            {isSigningInGuest ? "Launching Sandbox..." : "Continue as Guest (Local Sandbox)"}
+          </motion.button>
 
           {/* Privacy note */}
           <div className="flex items-start gap-2 mb-8">
             <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
             <p className="text-slate-400 text-xs leading-relaxed">
-              Your datasets stay in your browser. Cloud sync activates automatically upon standard login.
+              Your datasets stay in your browser and are never uploaded to any server.
             </p>
           </div>
 
