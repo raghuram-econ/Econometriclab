@@ -30,8 +30,10 @@ synthetic control method [@abadie2010synthetic], generalized linear models (Pois
 negative binomial, logit, probit), Heckman sample selection, ARIMA/VAR/GARCH
 time-series models, and Cox proportional-hazards survival models. Every
 result can be paired with a plain-language, AI-generated interpretation alongside its
-technical output, and every result can export the Stata, R, and Python code needed to
-reproduce that exact estimate outside the application.
+technical output. Most results can export the Stata, R, and Python code needed to
+reproduce that exact estimate outside the application, with Python omitted for the
+handful of methods lacking a reliable standard Python implementation (e.g. Tobit,
+Heckman selection).
 
 # Statement of need
 
