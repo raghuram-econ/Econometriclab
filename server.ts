@@ -816,6 +816,53 @@ async function startServer() {
     return code;
   }
 
+  function generatePythonScriptForModel(h: any, index: number): string {
+    const y = h.results?.yVar || "Y";
+    const xs = h.results?.xVars || h.results?.coefficients?.map((c: any) => c.variable).filter((v: string) => v !== "Intercept" && v !== "Intercept (FE)") || [];
+    const robust = h.results?.robust || false;
+    const clusterVar = h.results?.clusterVar;
+    const robustType = h.results?.robustType || "HC1";
+
+    let code = `\n# --- Model ${index + 1}: ${h.specification} ---\n`;
+    code += `print("Running Model ${index + 1}...")\n`;
+
+    if (h.results?.outlierTrim) {
+      const lowQ = h.results.outlierTrim / 100;
+      const highQ = 1 - h.results.outlierTrim / 100;
+      code += `df_temp = df.copy()\n`;
+      code += `y_low = df_temp['${y}'].quantile(${lowQ})\n`;
+      code += `y_high = df_temp['${y}'].quantile(${highQ})\n`;
+      code += `df_temp = df_temp[(df_temp['${y}'] >= y_low) & (df_temp['${y}'] <= y_high)]\n`;
+    } else {
+      code += `df_temp = df.copy()\n`;
+    }
+
+    const xList = xs.map((v: string) => `'${v}'`).join(', ');
+    if (h.module === "FE") {
+      // Matches the R (plm) and Stata (xtreg, fe) branches above: neither
+      // applies robust/cluster options to the FE specification, so this
+      // mirrors that rather than silently diverging from them.
+      code += `from linearmodels import PanelOLS\n`;
+      code += `panel_${index + 1} = df_temp.set_index(['${h.results?.entityId || 'id'}', '${h.results?.timeVar || 'time'}'])\n`;
+      code += `model_${index + 1} = PanelOLS(panel_${index + 1}['${y}'], panel_${index + 1}[[${xList}]], entity_effects=True)\n`;
+      code += `results_${index + 1} = model_${index + 1}.fit()\n`;
+      code += `print(results_${index + 1})\n`;
+    } else {
+      code += `import statsmodels.api as sm\n`;
+      code += `X_${index + 1} = sm.add_constant(df_temp[[${xList}]])\n`;
+      code += `model_${index + 1} = sm.OLS(df_temp['${y}'], X_${index + 1})\n`;
+      if (clusterVar) {
+        code += `results_${index + 1} = model_${index + 1}.fit(cov_type='cluster', cov_kwds={'groups': df_temp['${clusterVar}']})\n`;
+      } else if (robust) {
+        code += `results_${index + 1} = model_${index + 1}.fit(cov_type='${robustType}')\n`;
+      } else {
+        code += `results_${index + 1} = model_${index + 1}.fit()\n`;
+      }
+      code += `print(results_${index + 1}.summary())\n`;
+    }
+    return code;
+  }
+
   app.post("/api/export/replication-package", async (req, res) => {
     try {
       const { history = [], currentDataset } = req.body;
@@ -833,12 +880,14 @@ This package contains the files necessary to replicate the econometric specifica
 3. \`models_manifest.json\`: Parameters, options, and performance indices for each estimated model.
 4. \`reproduce_all.R\`: Executable R script to replicate all OLS and Fixed Effects estimations.
 5. \`reproduce_all.do\`: Executable Stata Do-file to replicate all estimations.
-6. \`validation_excerpt.md\`: A detailed econometric justification outlining the mathematical implementation of our estimators.
-7. \`data.csv\`: Raw dataset used during the estimation session (if present).
+6. \`reproduce_all.py\`: Executable Python script to replicate all OLS and Fixed Effects estimations.
+7. \`validation_excerpt.md\`: A detailed econometric justification outlining the mathematical implementation of our estimators.
+8. \`data.csv\`: Raw dataset used during the estimation session (if present).
 
 ## Requirements
 - **R Version**: >= 4.0.0 (requires libraries \`sandwich\`, \`lmtest\`, and \`plm\`)
 - **Stata Version**: >= 15.0 (for panel commands like \`xtset\` and \`xtreg\`)
+- **Python Version**: >= 3.8 (requires packages \`pandas\`, \`statsmodels\`, and \`linearmodels\`)
 
 ## Execution Instructions
 
@@ -858,6 +907,16 @@ This package contains the files necessary to replicate the econometric specifica
 2. Execute the do-file:
    \`\`\`stata
    do reproduce_all.do
+   \`\`\`
+
+### In Python
+1. Ensure required packages are installed:
+   \`\`\`bash
+   pip install pandas statsmodels linearmodels
+   \`\`\`
+2. Run the script from this directory:
+   \`\`\`bash
+   python reproduce_all.py
    \`\`\`
 `;
 
@@ -973,6 +1032,25 @@ This package contains the files necessary to replicate the econometric specifica
       stataScript += `display "Replication Completed Successfully!"\n`;
 
       zip.addFile("reproduce_all.do", Buffer.from(stataScript, "utf8"));
+
+      // 5b. Generate reproduce_all.py
+      let pyScript = `# Economics Learning Lab - Replication Python Script\n`;
+      pyScript += `# Generated automatically on ${new Date().toLocaleDateString()}\n\n`;
+      pyScript += `import os\n`;
+      pyScript += `import pandas as pd\n\n`;
+      pyScript += `print("--- Economics Learning Lab Replication Execution ---")\n`;
+      pyScript += `if not os.path.exists("data.csv"):\n`;
+      pyScript += `    raise FileNotFoundError("Please place the 'data.csv' file in this working directory before running.")\n\n`;
+      pyScript += `# Load raw dataset\n`;
+      pyScript += `df = pd.read_csv("data.csv")\n`;
+
+      history.forEach((h: any, i: number) => {
+        pyScript += generatePythonScriptForModel(h, i);
+      });
+
+      pyScript += `\nprint("Replication Completed Successfully!")\n`;
+
+      zip.addFile("reproduce_all.py", Buffer.from(pyScript, "utf8"));
 
       // 6. Generate validation_excerpt.md
       const validationContent = `# Econometric Estimator Numerical Validation
