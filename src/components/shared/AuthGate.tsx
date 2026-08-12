@@ -215,7 +215,22 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           )}
 
           
-          {/* Guest Sign-in button */}
+          {/* Google Sign-in button (primary) */}
+          {!isPopupBlocked && (
+            <motion.button
+              onClick={handleSignIn}
+              disabled={isSigningIn || isSigningInGuest}
+              className="w-full flex items-center justify-center gap-2 bg-slate-900 border border-slate-900 rounded-xl py-3 px-4 text-white font-semibold text-xs hover:bg-slate-800 transition-all duration-200 disabled:opacity-50 mb-3"
+              initial={{ scale: 0.97 }}
+              animate={{ scale: 1 }}
+              transition={{ delay: 0.5, type: "spring", stiffness: 300 }}
+            >
+              <LogIn className="w-4 h-4" />
+              {isSigningIn ? "Signing in..." : "Continue with Google"}
+            </motion.button>
+          )}
+
+          {/* Guest Sign-in button (secondary) */}
           {!isPopupBlocked && (
             <motion.button
               onClick={handleSignInGuest}
