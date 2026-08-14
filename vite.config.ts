@@ -20,7 +20,7 @@ export default defineConfig(({mode}) => {
             'vendor-react': ['react', 'react-dom'],
             'vendor-charts': ['recharts'],
             'vendor-math': ['mathjs'],
-            'vendor-firebase': ['firebase/app', 'firebase/firestore', 'firebase/auth'],
+            'vendor-supabase': ['@supabase/supabase-js'],
             'vendor-ai': ['@google/genai'],
             'vendor-ui': ['lucide-react', 'framer-motion', 'clsx', 'tailwind-merge'],
           }
