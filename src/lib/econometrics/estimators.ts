@@ -3,6 +3,7 @@ import jStat from 'jstat';
 import { runPoissonMLE, runNegBinomialMLE } from './count';
 import { RegressionResult } from '../../types';
 import { computeRobustCovariance } from './robust';
+import { wildBootstrapClusteredSE } from './ols';
 import { preprocessDataAndVars } from './ols';
 
 // Standard normal PDF helper
@@ -33,6 +34,12 @@ export interface EstimationParams {
   robust?: boolean;
   robustType?: 'HC0' | 'HC1' | 'HC2' | 'HC3' | 'NW';
   clusterVar?: string;
+  // Wild cluster bootstrap (OLS + clustering only).
+  // When true, wildBootstrapPValue and wildBootstrapConfLow/High are
+  // added to each coefficient alongside the cluster-robust t-test result.
+  // The bootstrap uses Rademacher weights and B iterations.
+  useWildBootstrap?: boolean;
+  wildBootstrapB?: number;
 }
 
 export function solveQR(X_in: number[][], Y_in: number[], labels?: string[], tol = 1e-15) {
@@ -325,6 +332,8 @@ export function estimateModel(
 
   if (modelType === 'OLS' || modelType === 'Robust OLS') {
     const isRobust = modelType === 'Robust OLS' || !!clusterVar;
+    const useWildBootstrap = !!params.useWildBootstrap && !!clusterVar;
+    const wildBootstrapB = params.wildBootstrapB ?? 999;
     
     // Construct X and Y
     const Y = cleanData.map(row => parseFloat(row[yVar] ?? '0'));
@@ -363,8 +372,12 @@ export function estimateModel(
     const fPValue = fNumeratorDf > 0 ? (1 - jStat.centralF.cdf(fStat, fNumeratorDf, fDenominatorDf)) : 0;
 
     let varCov: number[][];
+    // Set only when cluster-robust SEs are used; governs the reference
+    // distribution for inference (see dfInference below).
+    let nClusters: number | undefined = undefined;
     if (clusterVar) {
       const clusters = Array.from(new Set(cleanData.map(r => r[clusterVar])));
+      nClusters = clusters.length;
       const G = math.zeros(clusters.length, k) as any;
       clusters.forEach((clusterId, g) => {
         const clusterIndices: number[] = [];
@@ -394,13 +407,17 @@ export function estimateModel(
       varCov = math.multiply(XtX_inv, rss / (n - k)) as number[][];
     }
 
+    // Inference df: t(G - 1) under clustering (Stata vce(cluster),
+    // linearmodels cov_type='clustered'), t(n - k) otherwise. The residual
+    // df used for sigma^2, F and the information criteria stays n - k.
+    const dfInference = nClusters !== undefined ? nClusters - 1 : n - k;
+
     const coefficients = labels.map((label, i) => {
       const estimate = beta[i] ?? 0;
       const stdError = Math.sqrt(varCov[i]?.[i] ?? 0);
       const tStat = stdError !== 0 ? estimate / stdError : 0;
-      const df = n - k;
-      const pValue = 2 * (1 - jStat.studentt.cdf(Math.abs(tStat), df));
-      const tCrit = jStat.studentt.inv(0.975, df);
+      const pValue = 2 * (1 - jStat.studentt.cdf(Math.abs(tStat), dfInference));
+      const tCrit = jStat.studentt.inv(0.975, dfInference);
       
       let stars = '';
       if (pValue < 0.001) stars = '***';
@@ -421,6 +438,29 @@ export function estimateModel(
         stars
       };
     });
+
+    // Wild cluster bootstrap
+    // Called after coefficients are built so we can attach per-coefficient results.
+    if (useWildBootstrap && nClusters !== undefined) {
+      try {
+
+        const clusterIds = cleanData.map(r => r[clusterVar!]);
+        const betaArr = Array.from(beta) as number[];
+        // varCov may still be a mathjs matrix at this point; coerce to plain array
+        const varCovArr: number[][] = (varCov as any).toArray ? (varCov as any).toArray() : varCov;
+        const XtX_inv_arr: number[][] = (XtX_inv as any).toArray ? (XtX_inv as any).toArray() : XtX_inv;
+        const wbRes = wildBootstrapClusteredSE(X as number[][], Y, clusterIds, betaArr, varCovArr, XtX_inv_arr, wildBootstrapB);
+        coefficients.forEach((coef, idx) => {
+          if (wbRes.wild_bootstrap_pvalues[idx] !== undefined) {
+            (coef as any).wildBootstrapPValue = wbRes.wild_bootstrap_pvalues[idx];
+            (coef as any).wildBootstrapConfLow = wbRes.wild_bootstrap_ci_low[idx];
+            (coef as any).wildBootstrapConfHigh = wbRes.wild_bootstrap_ci_high[idx];
+          }
+        });
+      } catch (e) {
+        console.error('Wild bootstrap failed:', e);
+      }
+    }
 
     // BP test
     let bpStat = 0;
@@ -485,6 +525,8 @@ export function estimateModel(
       logLikelihood,
       n,
       df: n - k,
+      nClusters,
+      dfInference,
       rmse,
       rss,
       aic,
@@ -849,8 +891,10 @@ export function estimateModel(
     const xMeansOrig = xVars.map(v => cleanData.reduce((s, r) => s + parseFloat(r[v] ?? '0'), 0) / n);
     const avgIntercept = yMeanOrig - xMeansOrig.reduce((sum, mx, i) => sum + mx * (betaFE[i] ?? 0), 0);
 
+    let nClusters: number | undefined = undefined;
     if (clusterVar) {
       const clusters = Array.from(new Set(cleanData.map(r => r[clusterVar])));
+      nClusters = clusters.length;
       const G = math.zeros(clusters.length, k) as any;
       clusters.forEach((clusterId, g) => {
         const clusterIndices: number[] = [];
@@ -878,12 +922,21 @@ export function estimateModel(
       varCov = mCov.toArray ? mCov.toArray() : mCov;
     }
 
+    // Inference df. Without clustering this is the within-estimator
+    // residual df, n - entities - rankFE, which correctly charges for the
+    // absorbed entity parameters. With clustering the reference
+    // distribution is t(G - 1) instead: the cluster-robust variance
+    // estimator's sampling variability is governed by the number of
+    // clusters, not the number of observations. Matches linearmodels
+    // PanelOLS with cov_type='clustered'.
+    const dfInference = nClusters !== undefined ? nClusters - 1 : df;
+
     const coefficients = xVars.map((label, i) => {
       const estimate = betaFE[i] ?? 0;
       const stdError = Math.sqrt(varCov[i]?.[i] ?? 0);
       const tStat = stdError !== 0 ? estimate / stdError : 0;
-      const pValue = 2 * (1 - jStat.studentt.cdf(Math.abs(tStat), df));
-      const tCrit = jStat.studentt.inv(0.975, df);
+      const pValue = 2 * (1 - jStat.studentt.cdf(Math.abs(tStat), dfInference));
+      const tCrit = jStat.studentt.inv(0.975, dfInference);
       
       let stars = '';
       if (pValue < 0.001) stars = '***';
@@ -913,9 +966,9 @@ export function estimateModel(
     const interceptSE = Math.sqrt(Math.max(sigma2FE / n + xVx, 0));
     const interceptT = interceptSE > 0 ? avgIntercept / interceptSE : NaN;
     const interceptP = interceptSE > 0
-      ? 2 * (1 - jStat.studentt.cdf(Math.abs(interceptT), df))
+      ? 2 * (1 - jStat.studentt.cdf(Math.abs(interceptT), dfInference))
       : NaN;
-    const tCritInt = jStat.studentt.inv(0.975, df);
+    const tCritInt = jStat.studentt.inv(0.975, dfInference);
 
     let interceptStars = '';
     if (interceptP < 0.001) interceptStars = '***';
@@ -945,6 +998,8 @@ export function estimateModel(
       adjRSquared,
       n,
       df,
+      nClusters,
+      dfInference,
       rmse,
       rss,
       aic,

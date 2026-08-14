@@ -222,6 +222,10 @@ export function runOLS(
 
   // Variance-Covariance Matrix
   let varCov: number[][];
+  // Number of clusters, set only when cluster-robust SEs are used. It
+  // determines the reference distribution for inference (see dfInference
+  // below), so it is tracked here rather than recomputed later.
+  let nClusters: number | undefined = undefined;
   if (bootstrap) {
     const B_val = typeof bootstrap === 'number' ? bootstrap : undefined;
     varCov = bootstrapOLS(X, Y, B_val);
@@ -232,6 +236,7 @@ export function runOLS(
     if (clusters.length <= 1) {
       throw new Error("Clustering requires at least 2 distinct clusters.");
     }
+    nClusters = clusters.length;
     const G = math.zeros(clusters.length, k) as any;
     
     clusters.forEach((clusterId, g) => {
@@ -283,16 +288,32 @@ export function runOLS(
     });
   }
 
+  // Degrees of freedom for INFERENCE (p-values, critical values, CIs).
+  //
+  // With cluster-robust standard errors the reference distribution is
+  // t(G - 1), where G is the number of clusters -- not t(n - k). This is
+  // Stata's convention for vce(cluster) and linearmodels' for
+  // cov_type='clustered'. The number of clusters, not the number of
+  // observations, is what governs the sampling variability of the
+  // cluster-robust variance estimator.
+  //
+  // Using n - k here understates p-values and produces confidence
+  // intervals that are too narrow: at G = 34 the 95% critical value is
+  // 2.0345, not 1.9615, so intervals come out about 3.6% short.
+  //
+  // Note this is the inference df only. The residual df used for sigma^2,
+  // the F statistic and information criteria remains n - k.
+  const dfInference = nClusters !== undefined ? nClusters - 1 : n - k;
+
   // Coefficient Details
   const coefficients: any[] = labels.map((label, i) => {
     const estimate = (beta as any)[i] ?? 0;
     const v = varCov[i]?.[i] ?? 0;
     const stdError = v > 0 ? Math.sqrt(v) : NaN;
     const tStat = isNaN(stdError) || stdError === 0 ? NaN : estimate / stdError;
-    
-    const df = n - k;
-    const pValue = isNaN(tStat) ? NaN : 2 * (1 - jStat.studentt.cdf(Math.abs(tStat), df));
-    const tCrit = jStat.studentt.inv(0.975, df);
+
+    const pValue = isNaN(tStat) ? NaN : 2 * (1 - jStat.studentt.cdf(Math.abs(tStat), dfInference));
+    const tCrit = jStat.studentt.inv(0.975, dfInference);
     
     return {
       variable: label,
@@ -400,6 +421,8 @@ export function runOLS(
     logLikelihood,
     n,
     df: n - k,
+    nClusters,
+    dfInference,
     rmse,
     rss,
     aic,

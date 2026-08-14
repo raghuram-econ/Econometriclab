@@ -57,6 +57,19 @@ export interface RegressionResult {
   logLikelihood?: number;
   n: number;
   df: number;
+  /**
+   * Number of clusters, present only when cluster-robust standard errors
+   * were used. Undefined otherwise.
+   */
+  nClusters?: number;
+  /**
+   * Degrees of freedom of the reference t distribution used for p-values,
+   * critical values and confidence intervals. Equals `nClusters - 1` under
+   * clustering and the residual degrees of freedom otherwise. Reported so
+   * that the inferential convention is visible in the output rather than
+   * only in the source.
+   */
+  dfInference?: number;
   rmse: number;
   rss?: number;
   aic?: number;
