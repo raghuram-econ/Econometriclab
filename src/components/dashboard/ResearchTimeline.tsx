@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { auth, db } from '../../lib/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, getDocs, setDoc, doc, deleteDoc, query, orderBy, limit } from 'firebase/firestore';
+import { supabase } from '../../lib/supabase';
+import { User } from '@supabase/supabase-js';
 import { Calendar, Filter, Star, Eye, Download, Info, Search, Trash2 } from 'lucide-react';
 
 enum OperationType {
@@ -13,7 +12,7 @@ enum OperationType {
   WRITE = 'write',
 }
 
-interface FirestoreErrorInfo {
+interface SupabaseErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
@@ -22,32 +21,22 @@ interface FirestoreErrorInfo {
     email?: string | null;
     emailVerified?: boolean | null;
     isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
   };
 }
 
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
+function handleSupabaseError(error: unknown, operationType: OperationType, path: string | null, currentUser: User | null) {
+  const errInfo: SupabaseErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
+      userId: currentUser?.id,
+      email: currentUser?.email,
+      emailVerified: !!currentUser?.email_confirmed_at,
+      isAnonymous: currentUser?.is_anonymous,
     },
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  console.error('Supabase Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -126,18 +115,23 @@ export default function ResearchTimeline({
     }
 
     const isAlreadyPinned = pinnedResults.find(p => p.sessionId === run.id);
-    const pinnedPath = `users/${user.uid}/pinnedResults`;
+    const pinnedPath = `pinned_results (user ${user.id})`;
 
     try {
       if (isAlreadyPinned) {
         // Unpin item
-        await deleteDoc(doc(db, 'users', user.uid, 'pinnedResults', isAlreadyPinned.id));
+        const { error: delError } = await supabase
+          .from('pinned_results')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('id', isAlreadyPinned.id);
+        if (delError) throw delError;
         setBannerMsg({ text: "Result unpinned successfully.", type: 'success' });
       } else {
         // Pin item
         const keyResult = getKeyResultText(run.results);
         const pinId = `pin_${run.id}`;
-        
+
         let depVar = run.dependentVar;
         if (!depVar && run.specification) {
           depVar = (run.specification.split('~')[0] || "").trim();
@@ -152,18 +146,21 @@ export default function ResearchTimeline({
           order: 0
         };
 
-        await setDoc(doc(db, 'users', user.uid, 'pinnedResults', pinId), newPin);
+        const { error: upsertError } = await supabase
+          .from('pinned_results')
+          .upsert({ id: pinId, user_id: user.id, data: newPin });
+        if (upsertError) throw upsertError;
         setBannerMsg({ text: "Result pinned to Scholar Dashboard!", type: 'success' });
       }
-      
+
       // Auto-clear notification banner
       setTimeout(() => setBannerMsg(null), 4000);
-      
+
       // Reload parent data
       onRefresh();
     } catch (err) {
       try {
-        handleFirestoreError(err, OperationType.WRITE, pinnedPath);
+        handleSupabaseError(err, OperationType.WRITE, pinnedPath, user);
       } catch (wrappedErr: any) {
         setError(wrappedErr.message);
       }

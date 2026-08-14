@@ -1,17 +1,12 @@
-import { 
-  doc, 
-  setDoc, 
-  getDoc, 
-  collection, 
-  query, 
-  getDocs, 
-  deleteDoc,
-  serverTimestamp,
-  updateDoc
-} from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { ModelHistoryItem, Dataset, ResearchQuestion, ModuleTab } from '../types';
 import { RobustnessItem, TeachingState } from '../store/useStore';
+
+// Note: the Firestore version of this file had sanitizeForFirestore/
+// deserializeFromFirestore helpers to work around Firestore's restriction
+// on directly nesting arrays inside arrays. Postgres JSONB has no such
+// restriction -- arbitrary nested JSON is stored natively -- so those
+// helpers are dropped here rather than ported; payloads are stored as-is.
 
 enum OperationType {
   CREATE = 'create',
@@ -57,88 +52,31 @@ function getIDBDatabase(): Promise<IDBDatabase | null> {
   });
 }
 
-interface FirestoreErrorInfo {
+interface SupabaseErrorInfo {
   error: string;
   operationType: OperationType;
-  path: string | null;
+  table: string | null;
   authInfo: any;
 }
 
-function isPlainObject(value: any): boolean {
-  if (typeof value !== 'object' || value === null) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === null || proto === Object.prototype;
-}
-
-function sanitizeForFirestore(obj: any): any {
-  if (obj === undefined) {
-    return null;
-  }
-  if (obj === null) {
-    return null;
-  }
-  if (Array.isArray(obj)) {
-    const isNested = obj.some(item => Array.isArray(item));
-    if (isNested) {
-      return {
-        serialized_nested_array: true,
-        data: JSON.stringify(obj.map(item => sanitizeForFirestore(item)))
-      };
-    }
-    return obj.map(item => sanitizeForFirestore(item));
-  }
-  if (isPlainObject(obj)) {
-    const res: any = {};
-    for (const key of Object.keys(obj)) {
-      const val = obj[key];
-      if (val !== undefined) {
-        res[key] = sanitizeForFirestore(val);
-      }
-    }
-    return res;
-  }
-  return obj;
-}
-
-function deserializeFromFirestore(obj: any): any {
-  if (obj === null || obj === undefined) {
-    return obj;
-  }
-  if (Array.isArray(obj)) {
-    return obj.map(item => deserializeFromFirestore(item));
-  }
-  if (isPlainObject(obj)) {
-    if ((obj.serialized_nested_array || obj.__serialized_nested_array__) && typeof obj.data === 'string') {
-      try {
-        const parsed = JSON.parse(obj.data);
-        return deserializeFromFirestore(parsed);
-      } catch (e) {
-        console.error('Failed to parse serialized nested array:', e);
-        return [];
-      }
-    }
-    const res: any = {};
-    for (const key of Object.keys(obj)) {
-      res[key] = deserializeFromFirestore(obj[key]);
-    }
-    return res;
-  }
-  return obj;
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-    },
-    operationType,
-    path
+async function currentUserInfo() {
+  const { data: { user } } = await supabase.auth.getUser();
+  return {
+    userId: user?.id,
+    email: user?.email,
+    emailVerified: !!user?.email_confirmed_at,
+    isAnonymous: user?.is_anonymous,
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+}
+
+async function handleSupabaseError(error: unknown, operationType: OperationType, table: string | null) {
+  const errInfo: SupabaseErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: await currentUserInfo(),
+    operationType,
+    table
+  };
+  console.error('Supabase Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -150,10 +88,9 @@ export const persistenceService = {
     currentDataset: Dataset | null;
     selectedConceptId: string | null;
   }) {
-    const user = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const path = `users/${user.uid}/workspace/current`;
     try {
       // Stripping data from dataset to save only metadata as requested
       const datasetMetadata = data.currentDataset ? {
@@ -164,145 +101,193 @@ export const persistenceService = {
         structure: data.currentDataset.structure,
       } : null;
 
-      await setDoc(doc(db, path), sanitizeForFirestore({
-        ...data,
-        currentDataset: datasetMetadata,
-        lastUpdated: serverTimestamp(),
-      }));
+      const { error } = await supabase.from('workspaces').upsert({
+        user_id: user.id,
+        data: {
+          ...data,
+          currentDataset: datasetMetadata,
+        },
+        updated_at: new Date().toISOString(),
+      });
+      if (error) throw error;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      await handleSupabaseError(error, OperationType.WRITE, 'workspaces');
     }
   },
 
   async loadWorkspace() {
-    const user = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
-    const path = `users/${user.uid}/workspace/current`;
     try {
-      const snap = await getDoc(doc(db, path));
-      return snap.exists() ? deserializeFromFirestore(snap.data()) : null;
+      const { data, error } = await supabase
+        .from('workspaces')
+        .select('data')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.data ?? null;
     } catch (error) {
-      handleFirestoreError(error, OperationType.GET, path);
+      await handleSupabaseError(error, OperationType.GET, 'workspaces');
     }
   },
 
   async saveModelRun(run: ModelHistoryItem) {
-    const user = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const path = `users/${user.uid}/modelRuns/${run.id}`;
     try {
-      await setDoc(doc(db, path), sanitizeForFirestore(run));
+      const { error } = await supabase.from('model_runs').upsert({
+        id: run.id,
+        user_id: user.id,
+        data: run,
+      });
+      if (error) throw error;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      await handleSupabaseError(error, OperationType.WRITE, 'model_runs');
     }
   },
 
   async updateModelRunNote(id: string, notes: string) {
-    const user = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const path = `users/${user.uid}/modelRuns/${id}`;
     try {
-      await updateDoc(doc(db, path), sanitizeForFirestore({ notes }));
+      const { data: existing, error: fetchError } = await supabase
+        .from('model_runs')
+        .select('data')
+        .eq('user_id', user.id)
+        .eq('id', id)
+        .maybeSingle();
+      if (fetchError) throw fetchError;
+      const { error } = await supabase
+        .from('model_runs')
+        .update({ data: { ...(existing?.data ?? {}), notes } })
+        .eq('user_id', user.id)
+        .eq('id', id);
+      if (error) throw error;
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+      await handleSupabaseError(error, OperationType.UPDATE, 'model_runs');
     }
   },
 
   async loadModelHistory() {
-    const user = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return [];
 
-    const path = `users/${user.uid}/modelRuns`;
     try {
-      const q = query(collection(db, path));
-      const snap = await getDocs(q);
-      return snap.docs.map(d => deserializeFromFirestore({ ...d.data(), id: d.id } as ModelHistoryItem));
+      const { data, error } = await supabase
+        .from('model_runs')
+        .select('id, data')
+        .eq('user_id', user.id);
+      if (error) throw error;
+      return (data ?? []).map(row => ({ ...(row.data as object), id: row.id } as ModelHistoryItem));
     } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, path);
+      await handleSupabaseError(error, OperationType.LIST, 'model_runs');
     }
   },
 
   async saveRobustnessEntry(item: RobustnessItem) {
-    const user = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const path = `users/${user.uid}/robustness/${item.id}`;
     try {
-      await setDoc(doc(db, path), sanitizeForFirestore(item));
+      const { error } = await supabase.from('robustness_items').upsert({
+        id: item.id,
+        user_id: user.id,
+        data: item,
+      });
+      if (error) throw error;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      await handleSupabaseError(error, OperationType.WRITE, 'robustness_items');
     }
   },
 
   async loadRobustnessItems() {
-    const user = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return [];
 
-    const path = `users/${user.uid}/robustness`;
     try {
-      const q = query(collection(db, path));
-      const snap = await getDocs(q);
-      return snap.docs.map(d => deserializeFromFirestore(d.data() as RobustnessItem));
+      const { data, error } = await supabase
+        .from('robustness_items')
+        .select('data')
+        .eq('user_id', user.id);
+      if (error) throw error;
+      return (data ?? []).map(row => row.data as RobustnessItem);
     } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, path);
+      await handleSupabaseError(error, OperationType.LIST, 'robustness_items');
     }
   },
 
   async saveReportDraft(draft: any) {
-    const user = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const path = `users/${user.uid}/reports/${draft.id || 'current'}`;
     try {
-      await setDoc(doc(db, path), sanitizeForFirestore({
-        ...draft,
-        timestamp: new Date().toISOString()
-      }));
+      const { error } = await supabase.from('report_drafts').upsert({
+        id: draft.id || 'current',
+        user_id: user.id,
+        data: {
+          ...draft,
+          timestamp: new Date().toISOString()
+        },
+      });
+      if (error) throw error;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      await handleSupabaseError(error, OperationType.WRITE, 'report_drafts');
     }
   },
 
   async loadReportDrafts() {
-    const user = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return [];
 
-    const path = `users/${user.uid}/reports`;
     try {
-      const snap = await getDocs(collection(db, path));
-      return snap.docs.map(d => deserializeFromFirestore(d.data()));
+      const { data, error } = await supabase
+        .from('report_drafts')
+        .select('data')
+        .eq('user_id', user.id);
+      if (error) throw error;
+      return (data ?? []).map(row => row.data);
     } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, path);
+      await handleSupabaseError(error, OperationType.LIST, 'report_drafts');
     }
   },
 
   async savePipelineNote(note: { id: string; stageId: string; content: string; authorName: string; authorUid: string; createdAt: string }) {
-    const path = `pipelineNotes/${note.id}`;
     try {
-      await setDoc(doc(db, path), sanitizeForFirestore(note));
+      const { error } = await supabase.from('pipeline_notes').insert({
+        id: note.id,
+        stage_id: note.stageId,
+        content: note.content,
+        author_name: note.authorName,
+        author_uid: note.authorUid,
+        created_at: note.createdAt,
+      });
+      if (error) throw error;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      await handleSupabaseError(error, OperationType.WRITE, 'pipeline_notes');
     }
   },
 
   async updatePipelineNote(id: string, content: string) {
-    const path = `pipelineNotes/${id}`;
     try {
-      await updateDoc(doc(db, path), sanitizeForFirestore({ content }));
+      const { error } = await supabase
+        .from('pipeline_notes')
+        .update({ content })
+        .eq('id', id);
+      if (error) throw error;
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+      await handleSupabaseError(error, OperationType.UPDATE, 'pipeline_notes');
     }
   },
 
   async deletePipelineNote(id: string) {
-    const path = `pipelineNotes/${id}`;
     try {
-      await deleteDoc(doc(db, path));
+      const { error } = await supabase.from('pipeline_notes').delete().eq('id', id);
+      if (error) throw error;
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+      await handleSupabaseError(error, OperationType.DELETE, 'pipeline_notes');
     }
   },
 

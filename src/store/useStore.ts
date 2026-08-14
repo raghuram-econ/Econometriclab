@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Dataset, ModelHistoryItem, ResearchQuestion, ModuleTab, ManuscriptSections } from '../types';
 import { persistenceService } from '../services/persistenceService';
 import { subscribeToAuth } from '../services/authService';
-import { User } from 'firebase/auth';
+import { User } from '@supabase/supabase-js';
 import { debounce } from 'lodash';
 import { getSampleData } from '../services/dataService';
 import { applyVariableTransform } from '../lib/variableTransforms';

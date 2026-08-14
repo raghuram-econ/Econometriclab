@@ -2,8 +2,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { initializeApp, getApps } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import { Type } from "@google/genai";
@@ -159,21 +158,26 @@ async function startServer() {
     next();
   });
 
-  // Load firebase project ID safely for admin SDK setup
-  let firebaseProjectId = process.env.VITE_FIREBASE_PROJECT_ID || "think-like-a-economist";
-
-  if (getApps().length === 0) {
-    initializeApp({
-      projectId: firebaseProjectId
-    });
+  // New Supabase projects default to asymmetric JWT signing keys (RS256/ES256),
+  // not the legacy shared-secret HS256 JWT -- confirmed against Supabase's
+  // own docs for this project (created today). Verification is therefore
+  // JWKS-based (public keys fetched from the project's well-known endpoint),
+  // not a static secret: no SUPABASE_JWT_SECRET is needed at all, which is
+  // actually simpler to deploy than the Firebase/legacy-JWT equivalent.
+  const supabaseProjectUrl = process.env.VITE_SUPABASE_URL;
+  let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
+  if (supabaseProjectUrl) {
+    jwks = createRemoteJWKSet(new URL(`${supabaseProjectUrl}/auth/v1/.well-known/jwks.json`));
+  } else {
+    console.error("[auth] VITE_SUPABASE_URL is not set -- all authenticated API routes will reject every request.");
   }
 
   // Authentication middleware (reads headers, no body parsing needed)
   const authMiddleware = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     // Skip auth check for /api/health and public datasets
     if (
-      req.path === "/health" || 
-      req.path === "/api/health" || 
+      req.path === "/health" ||
+      req.path === "/api/health" ||
       req.originalUrl === "/api/health" ||
       req.path === "/api/datasets/mroz" ||
       req.originalUrl === "/api/datasets/mroz"
@@ -187,13 +191,20 @@ async function startServer() {
       return res.status(401).json({ error: "Authentication required" });
     }
 
+    if (!jwks || !supabaseProjectUrl) {
+      return res.status(500).json({ error: "Server auth is not configured" });
+    }
+
     const token = authHeader.substring("Bearer ".length);
     try {
-      const decoded = await getAuth().verifyIdToken(token);
-      (req as any).user = decoded;
+      const { payload } = await jwtVerify(token, jwks, {
+        issuer: `${supabaseProjectUrl}/auth/v1`,
+        audience: "authenticated",
+      });
+      (req as any).user = payload;
       return next();
     } catch (err) {
-      console.error("[auth] verifyIdToken failed:", err);
+      console.error("[auth] Supabase JWT verification failed:", err);
       return res.status(401).json({ error: "Invalid token" });
     }
   };
@@ -205,7 +216,7 @@ async function startServer() {
   const estimationLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 30,
-    keyGenerator: (req: any) => req.user?.uid || ipKeyGenerator(req.ip) || 'anonymous',
+    keyGenerator: (req: any) => req.user?.sub || ipKeyGenerator(req.ip) || 'anonymous',
     message: { error: "Too many estimation requests. Please wait a minute before trying again." },
     standardHeaders: true,
     legacyHeaders: false,
@@ -215,7 +226,7 @@ async function startServer() {
   const geminiLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 10,
-    keyGenerator: (req: any) => req.user?.uid || ipKeyGenerator(req.ip) || 'anonymous',
+    keyGenerator: (req: any) => req.user?.sub || ipKeyGenerator(req.ip) || 'anonymous',
     message: { error: "Too many AI consultation requests. Please wait a minute before trying again." },
     standardHeaders: true,
     legacyHeaders: false,

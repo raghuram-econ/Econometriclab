@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../lib/firebase';
-import { User } from 'firebase/auth';
-import { deleteDoc, doc } from 'firebase/firestore';
+import { supabase } from '../../lib/supabase';
+import { User } from '@supabase/supabase-js';
 import { callBackendAPI } from '../../services/apiClient';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, Pin, Trash2, ExternalLink, Loader2, AlertCircle, FileText } from 'lucide-react';
@@ -162,8 +161,12 @@ export default function AIDigest({
   const handleUnpin = async (pinId: string) => {
     if (!user) return;
     try {
-      const pinDocRef = doc(db, 'users', user.uid, 'pinnedResults', pinId);
-      await deleteDoc(pinDocRef);
+      const { error } = await supabase
+        .from('pinned_results')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('id', pinId);
+      if (error) throw error;
       onRefresh();
     } catch (err: any) {
       console.error('[AIDigest] Error deleting pin:', err);

@@ -3,23 +3,23 @@
 // API Client for Econometrics Lab
 // ============================================================
 
-import { auth } from '../lib/firebase';
+import { getAccessToken } from './authService';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL ?? "";
 
-// Helper to get headers with the Firebase ID token for security verification
+// Helper to get headers with the Supabase access token for security verification
 export async function getAuthHeaders(): Promise<HeadersInit> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
 
-  if (auth.currentUser) {
-    try {
-      const token = await auth.currentUser.getIdToken();
+  try {
+    const token = await getAccessToken();
+    if (token) {
       headers['Authorization'] = `Bearer ${token}`;
-    } catch (err) {
-      console.error('[API Client] Error retrieving Firebase ID token:', err);
     }
+  } catch (err) {
+    console.error('[API Client] Error retrieving Supabase access token:', err);
   }
 
   return headers;

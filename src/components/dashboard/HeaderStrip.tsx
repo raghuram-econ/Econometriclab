@@ -1,5 +1,5 @@
 import React from 'react';
-import { User } from 'firebase/auth';
+import { User } from '@supabase/supabase-js';
 import { Database, Binary, CalendarRange, ArrowRight, GraduationCap, Sparkles } from 'lucide-react';
 
 interface ModelRunItem {
@@ -62,7 +62,7 @@ export default function HeaderStrip({ onNavigate, user, modelRuns, loading, erro
     };
   }, [modelRuns]);
 
-  const displayName = user?.displayName || user?.email?.split('@')[0] || "Scholar";
+  const displayName = user?.user_metadata?.displayName || user?.email?.split('@')[0] || "Scholar";
 
   return (
     <div id="header-strip-container" className="bg-slate-900 border border-slate-800 text-white rounded-2xl p-6 mb-6 shadow-md relative overflow-hidden">

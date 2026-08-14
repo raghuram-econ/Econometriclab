@@ -561,11 +561,15 @@ export default function App() {
       let run = history.find(h => h.id === sessionId);
       
       if (!run) {
-        const { doc, getDoc } = await import('firebase/firestore');
-        const { db } = await import('./lib/firebase');
-        const runDoc = await getDoc(doc(db, 'users', user.uid, 'modelRuns', sessionId));
-        if (runDoc.exists()) {
-          run = runDoc.data() as any;
+        const { supabase } = await import('./lib/supabase');
+        const { data: runRow } = await supabase
+          .from('model_runs')
+          .select('data')
+          .eq('user_id', user.id)
+          .eq('id', sessionId)
+          .maybeSingle();
+        if (runRow) {
+          run = runRow.data as any;
         }
       }
       
@@ -627,11 +631,15 @@ export default function App() {
       let run = history.find(h => h.id === sessionId);
       
       if (!run) {
-        const { doc, getDoc } = await import('firebase/firestore');
-        const { db } = await import('./lib/firebase');
-        const runDoc = await getDoc(doc(db, 'users', user.uid, 'modelRuns', sessionId));
-        if (runDoc.exists()) {
-          run = runDoc.data() as any;
+        const { supabase } = await import('./lib/supabase');
+        const { data: runRow } = await supabase
+          .from('model_runs')
+          .select('data')
+          .eq('user_id', user.id)
+          .eq('id', sessionId)
+          .maybeSingle();
+        if (runRow) {
+          run = runRow.data as any;
         }
       }
       
