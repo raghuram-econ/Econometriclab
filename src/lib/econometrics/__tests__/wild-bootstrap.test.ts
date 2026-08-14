@@ -26,11 +26,11 @@ function makeData(G: number, m: number, betaTrue: number, seed = 20260813) {
 // matrix product — that underestimated the SE by up to 40% and made |t_j|
 // so large that no bootstrap t-stat could exceed it, producing p = 0.
 function matmul22(A: number[][], B: number[][]): number[][] {
+  const a00 = A[0]?.[0] ?? 0, a01 = A[0]?.[1] ?? 0, a10 = A[1]?.[0] ?? 0, a11 = A[1]?.[1] ?? 0;
+  const b00 = B[0]?.[0] ?? 0, b01 = B[0]?.[1] ?? 0, b10 = B[1]?.[0] ?? 0, b11 = B[1]?.[1] ?? 0;
   return [
-    [ A[0]![0] * B[0]![0] + A[0]![1] * B[1]![0],
-      A[0]![0] * B[0]![1] + A[0]![1] * B[1]![1] ],
-    [ A[1]![0] * B[0]![0] + A[1]![1] * B[1]![0],
-      A[1]![0] * B[0]![1] + A[1]![1] * B[1]![1] ],
+    [a00 * b00 + a01 * b10, a00 * b01 + a01 * b11],
+    [a10 * b00 + a11 * b10, a10 * b01 + a11 * b11],
   ];
 }
 
@@ -68,13 +68,15 @@ function simpleOLS(X: number[][], y: number[], G: number, m: number) {
     scores[g]![0] += (X[i]?.[0] ?? 0) * (res[i] ?? 0);
     scores[g]![1] += (X[i]?.[1] ?? 0) * (res[i] ?? 0);
   }
-  const meat: number[][] = [[0, 0], [0, 0]];
+  let m00 = 0, m01 = 0, m10 = 0, m11 = 0;
   for (const sg of scores) {
-    meat[0]![0] += (sg[0]) ** 2;
-    meat[0]![1] += sg[0] * sg[1];
-    meat[1]![0] += sg[1] * sg[0];
-    meat[1]![1] += (sg[1]) ** 2;
+    const s0 = sg[0] ?? 0, s1 = sg[1] ?? 0;
+    m00 += s0 * s0;
+    m01 += s0 * s1;
+    m10 += s1 * s0;
+    m11 += s1 * s1;
   }
+  const meat: number[][] = [[m00, m01], [m10, m11]];
 
   // Correct CR1 sandwich: corr * A @ meat @ A  (full 2x2 matrix product)
   const corr = (G / (G - 1)) * ((n - 1) / (n - k));
