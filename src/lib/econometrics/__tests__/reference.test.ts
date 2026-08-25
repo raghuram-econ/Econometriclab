@@ -505,7 +505,7 @@ describe('ARIMA (browser engine): pure-AR sanity check, MA rejected', () => {
     expect(relErr(res.coefficients['lag1']!, 0.7305)).toBeLessThan(0.01);
   });
 
-  it('rejects q > 0 rather than silently returning a biased estimate', () => {
+   it('rejects q > 0 rather than silently returning a biased estimate', () => {
     // Regression guard: an earlier version fit AR via one-shot OLS and then
     // bolted an MA correction onto the residuals afterward without ever
     // re-estimating AR jointly with MA. On this same series that produced
@@ -514,6 +514,25 @@ describe('ARIMA (browser engine): pure-AR sanity check, MA rejected', () => {
     // -- while being numerically indistinguishable from the misspecified
     // AR(1)-only fit above. The engine must now refuse q > 0 outright.
     expect(() => runARIMA(series, 1, 0, 1, 5)).toThrow(/not supported/i);
+  });
+
+  it('does not fit a spurious intercept/drift when d >= 1 (matches R default)', () => {
+    // Regression guard: an earlier version passed includeIntercept=true to
+    // runOLS unconditionally, for every value of d. R's forecast::Arima()
+    // never fits a constant when d >= 1 unless include.drift=TRUE is set
+    // explicitly. On short, real-world series (e.g. a ~18-obs differenced
+    // CPI series) that spurious intercept made the design matrix for
+    // {Intercept, lag1} nearly collinear, and the resulting AR coefficient
+    // came out as -26.41 against R's 0.88 for the identical ARIMA(1,1,0)
+    // model. Differencing this fixture's series once and confirming no
+    // Intercept key appears by default is a cheap, data-independent way to
+    // guard against that regression.
+    const res = runARIMA(series, 1, 1, 0, 5);
+    expect(res.coefficients['Intercept']).toBeUndefined();
+
+    // Explicit opt-in (R's include.drift = TRUE) should still work.
+    const resWithDrift = runARIMA(series, 1, 1, 0, 5, true);
+    expect(resWithDrift.coefficients['Intercept']).toBeDefined();
   });
 });
 
