@@ -21,11 +21,21 @@ export function runARIMA(
   p: number,
   d: number,
   q: number,
-  horizon: number
+  horizon: number,
+  // Mirrors R's forecast::Arima() default: a constant/drift term is fit
+  // when d === 0, but is OMITTED when d >= 1 unless the caller explicitly
+  // opts in (R's include.drift = TRUE). Previously this was hard-coded to
+  // `true` for every d, which forces a spurious intercept into the
+  // differenced-series regression. On short series this can make the
+  // intercept and lag terms nearly collinear, producing wildly unstable
+  // AR coefficients (observed: -26.4 on real CPI data vs. R's 0.88 for the
+  // same ARIMA(1,1,0) model) instead of a proper drift estimate.
+  driftOption?: boolean
 ): ARIMAResult {
   if (series.length < p + d + 5) {
     throw new Error('Series too short for selected parameters.');
   }
+  
 
   if (q > 0) {
     throw new Error(
@@ -56,9 +66,10 @@ export function runARIMA(
     arData.push(row);
   }
 
-  // 3. Estimate using OLS (AR part)
+   // 3. Estimate using OLS (AR part)
+  const includeIntercept = driftOption ?? (d === 0);
   const lags = Array.from({ length: p }, (_, i) => `lag${i + 1}`);
-  const regression = runOLS(arData, 'y', lags, true);
+  const regression = runOLS(arData, 'y', lags, includeIntercept);
 
   const coefficients: Record<string, number> = {};
   regression.coefficients.forEach(c => {
