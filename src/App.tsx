@@ -345,13 +345,14 @@ export default function App() {
         );
       }
 
-      const newItem: ModelHistoryItem = {
+         const newItem: ModelHistoryItem = {
         id: Math.random().toString(36).substr(2, 9),
         timestamp: new Date().toISOString(),
         module: moduleName as any,
         specification,
         results,
-        interpretation
+        interpretation,
+        filePath: currentDataset?.name
       };
 
       addToHistory(newItem);
