@@ -134,7 +134,6 @@ export interface ManuscriptSections {
   diagnostics: string;
   implications: string;
 }
-
 export interface ModelHistoryItem {
   id: string;
   timestamp: string;
@@ -143,7 +142,9 @@ export interface ModelHistoryItem {
   results: any;
   interpretation?: string | null;
   notes?: string;
+  filePath?: string;
 }
+
 
 export type ModuleTab = 
   | 'dashboard'
