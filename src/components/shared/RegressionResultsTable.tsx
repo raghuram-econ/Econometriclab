@@ -15,7 +15,7 @@ interface ResultsProps {
   results: any | null;
   dependentVar: string;
   variableMetadata?: any;
-  modelType?: "ols" | "logit" | "probit" | "panel_fe" | "panel_re" | "iv" | "arima" | "survival_cox";
+  modelType?: "ols" | "quantile" | "logit" | "probit" | "panel_fe" | "panel_re" | "iv" | "arima" | "survival_cox";
   xVariables?: string[];
   options?: {
     robust?: boolean;
@@ -422,7 +422,7 @@ export default function RegressionResultsTable({
     
     // Header Row 2: Estimator Type
     const estimatorTypes = [''].concat(specs.map(s => {
-      const typeLabel = s.modelType === 'panel_fe' ? 'Panel FE' : (s.modelType === 'panel_re' ? 'Panel RE' : 'OLS');
+            const typeLabel = s.modelType === 'panel_fe' ? 'Panel FE' : (s.modelType === 'panel_re' ? 'Panel RE' : (s.modelType === 'quantile' ? 'Quantile' : 'OLS'));
       return `\\multicolumn{1}{c}{\\small (${typeLabel})}`;
     }));
     latex += estimatorTypes.join(' & ') + ' \\\\\n';
@@ -789,7 +789,7 @@ export default function RegressionResultsTable({
                   >
                     {spec.title}
                     <span className="block text-[8px] font-normal lowercase tracking-normal text-slate-400 mt-0.5">
-                      {spec.modelType === 'panel_fe' ? 'Panel FE' : (spec.modelType === 'panel_re' ? 'Panel RE' : 'OLS')}
+                     {spec.modelType === 'panel_fe' ? 'Panel FE' : (spec.modelType === 'panel_re' ? 'Panel RE' : (spec.modelType === 'quantile' ? 'Quantile' : 'OLS'))} 
                     </span>
                   </th>
                 ))}
