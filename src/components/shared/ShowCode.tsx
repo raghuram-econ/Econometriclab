@@ -586,16 +586,22 @@ print(results.summary())`;
         return '';
     }
   };
-
-  const getCode = () => {
+    const getCode = () => {
+    let raw: string;
     switch (activeTab) {
       case 'stata':
-        return getStataCode();
+        raw = getStataCode();
+        break;
       case 'r':
-        return getRCode();
+        raw = getRCode();
+        break;
       case 'python':
-        return getPythonCode();
+        raw = getPythonCode();
+        break;
+      default:
+        raw = '';
     }
+    return raw.replace(/your_data\.csv/g, safeFilePath);
   };
 
   const activeCode = getCode();
