@@ -352,7 +352,7 @@ export default function App() {
         specification,
         results,
         interpretation,
-        filePath: currentDataset?.name
+        filePath: currentDataset?.name?.replace(/^Uploaded:\s*/, '')
       };
 
       addToHistory(newItem);
