@@ -25,19 +25,30 @@ export const ReplicationCodeTab: React.FC<ReplicationCodeTabProps> = ({ activeRu
   const parseSpecification = (item: ModelHistoryItem) => {
     let yVar = 'y';
     let xVars: string[] = [];
-    let modelType: 'ols' | 'fe' | 'arima' | 'causal' | 'limited' = 'ols';
+    let modelType: 'ols' | 'quantile' | 'fe' | 'arima' | 'causal' | 'limited' = 'ols';
     let options: any = {};
 
     const spec = item.specification || '';
     const moduleLower = (item.module ?? '').toLowerCase();
 
     if (moduleLower === 'ols') {
-      modelType = 'ols';
-      const match = spec.match(/^(.+?)\s*~\s*(.+?)\s*\((OLS|Quantile:.+?)\)/i);
+      const match = spec.match(/^(.+?)\s*~\s*(.+?)\s*\((OLS|Quantile:\s*([\d.]+))\)/i);
       if (match) {
         yVar = (match[1] ?? '').trim();
         xVars = (match[2] ?? '').split('+').map(x => x.trim()).filter(x => x && x !== 'Intercept');
+        if (match[4]) {
+          // Quantile regression run inside the OLS tab -- previously this
+          // branch always hardcoded modelType = 'ols', so quantile runs
+          // silently got OLS (lm()) replication code, with only the stale
+          // "(Quantile: 0.5)" text in the header comment giving away the
+          // mismatch. Route these to a dedicated quantreg/rq() branch.
+          modelType = 'quantile';
+          options.tau = parseFloat(match[4]);
+        } else {
+          modelType = 'ols';
+        }
       } else {
+        modelType = 'ols';
         const parts = spec.split('~');
         if (parts.length === 2) {
           yVar = (parts[0] ?? '').trim();
@@ -186,6 +197,18 @@ import delimited "dataset.csv", clear
       }
       code += `${cmd}\n\n`;
       code += `* Post-estimation diagnostics\nrvfplot, yline(0)\nestat imtest, white\n`;
+    } else if (modelType === 'quantile') {
+      const tau = options.tau ?? 0.5;
+      code += `* 2. Quantile Regression (Conditional Quantile Estimation)
+* Dependent Variable: ${yVar}
+* Independent Variables: ${xVars.join(', ')}
+* Quantile (Tau): ${tau}
+qreg ${yVar} ${xVars.join(' ')}, quantile(${tau})
+
+* Bootstrap standard errors (qreg's default analytic SEs are unreliable
+* under heteroskedasticity/non-iid errors; bsqreg re-estimates via bootstrap)
+bsqreg ${yVar} ${xVars.join(' ')}, quantile(${tau}) reps(200)
+`;
     } else if (modelType === 'fe') {
       const entity = options.entity || 'id';
       const time = options.time || 'year';
@@ -363,6 +386,8 @@ required_packages <- c("sandwich", "lmtest", "ggplot2", "dplyr"`;
 
     if (modelType === 'fe') {
       code += `, "fixest", "plm"`;
+    } else if (modelType === 'quantile') {
+      code += `, "quantreg"`;
     } else if (modelType === 'arima') {
       code += `, "forecast"`;
     } else if (modelType === 'causal') {
@@ -388,7 +413,13 @@ library(ggplot2)
 library(dplyr)
 library(sandwich)
 library(lmtest)
+`;
 
+    if (modelType === 'quantile') {
+      code += `library(quantreg)\n`;
+    }
+
+    code += `
 # 2. Load Dataset (Ensure your dataset.csv is in R's active working directory)
 # setwd("path/to/your/folder")
 df <- read.csv("dataset.csv")
@@ -430,6 +461,19 @@ coeftest(ols_model, vcov = vcovHC(ols_model, type = "HC1"))
 # bptest(ols_model)
 `;
       }
+    } else if (modelType === 'quantile') {
+      const tau = options.tau ?? 0.5;
+      code += `# 3. Quantile Regression (Conditional Quantile Estimation)
+# Dependent Variable: ${yVar}
+# Independent Variables: ${xVars.join(', ')}
+# Quantile (Tau): ${tau}
+
+qr_model <- rq(${yVar} ~ ${xVars.join(' + ')}, tau = ${tau}, data = df)
+
+# Bootstrap standard errors (recommended: rq()'s default rank-based CIs
+# assume iid errors, which rarely holds for real economic data)
+summary(qr_model, se = "boot")
+`;
     } else if (modelType === 'fe') {
       const entity = options.entity || 'id';
       const time = options.time || 'year';
