@@ -927,7 +927,7 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
             results={estimationResults}
             dependentVar={dependentVar}
             variableMetadata={variableMetadata}
-            modelType="ols"
+            modelType={regressionMode === 'quantile' ? 'quantile' : 'ols'}
             xVariables={independentVars}
             options={resultsTableOptions}
           />
