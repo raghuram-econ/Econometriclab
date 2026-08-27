@@ -156,6 +156,7 @@ export const ReplicationCodeTab: React.FC<ReplicationCodeTabProps> = ({ activeRu
   };
 
   const { yVar, xVars, modelType, options } = parseSpecification(activeRun);
+  const safeFilePath = (activeRun.filePath || 'dataset.csv').replace(/\\/g, '/');
 
   // Stata replication script builder
   const getStataReplicationCode = () => {
@@ -168,8 +169,8 @@ export const ReplicationCodeTab: React.FC<ReplicationCodeTabProps> = ({ activeRu
 * Specification: ${activeRun.specification}
 *====================================================================
 
-* 1. Load Dataset (Ensure your dataset.csv is in Stata's working directory)
-import delimited "dataset.csv", clear
+* 1. Load Dataset (Ensure your dataset is in Stata's working directory)
+import delimited "${safeFilePath}", clear
 
 `;
 
@@ -420,9 +421,9 @@ library(lmtest)
     }
 
     code += `
-# 2. Load Dataset (Ensure your dataset.csv is in R's active working directory)
+# 2. Load Dataset (Ensure your dataset is in R's active working directory)
 # setwd("path/to/your/folder")
-df <- read.csv("dataset.csv")
+df <- read.csv("${safeFilePath}")
 
 `;
 
