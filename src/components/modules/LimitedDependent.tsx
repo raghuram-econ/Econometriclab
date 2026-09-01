@@ -375,8 +375,8 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
     ).join('\n\n');
 
     return {
-      stata: `* Cumulative-threshold binary logit proxy (matches this app's own\n* "Ordered Logit" tab -- NOT a genuine proportional-odds ologit)\nuse "your_data.dta", clear\n\n${stata}`,
-      r: `# Cumulative-threshold binary logit proxy (matches this app's own\n# "Ordered Logit" tab -- NOT a genuine proportional-odds polr/ologit)\ndata <- read.csv("your_data.csv")\n\n${r}`
+      stata: `* Cumulative-threshold binary logit proxy (matches this app's own\n* "Ordered Logit" tab -- NOT a genuine proportional-odds ologit)\nuse "${(dataset?.name || 'your_data.dta').replace(/^Uploaded:\s*/, '').replace(/\\/g, '/')}", clear\n\n${stata}`,
+      r: `# Cumulative-threshold binary logit proxy (matches this app's own\n# "Ordered Logit" tab -- NOT a genuine proportional-odds polr/ologit)\ndata <- read.csv("${(dataset?.name || 'your_data.csv').replace(/^Uploaded:\s*/, '').replace(/\\/g, '/')}")\n\n${r}`
     };
   }, [orderedResult, orderedOutcome, orderedPredictors]);
 
@@ -662,6 +662,7 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                       modelType: lpModelType,
                       yVariable: lpOutcome,
                       xVariables: lpPredictors,
+                      filePath: dataset?.name,
                       options: {}
                     }}
                   />
@@ -834,6 +835,7 @@ export default function LimitedDependent({ dataset, onRunComplete }: LimitedDepe
                     modelType: "tobit",
                     yVariable: tobitOutcome,
                     xVariables: tobitPredictors,
+                    filePath: dataset?.name,
                     options: { cutoff: tobitResult.cutoff }
                   }}
                 />
