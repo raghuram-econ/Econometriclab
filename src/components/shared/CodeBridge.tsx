@@ -3,7 +3,7 @@ import { Terminal, Copy, Check } from 'lucide-react';
 import { cn, copyTextToClipboard } from '../../lib/utils';
 
 interface CodeBridgeProps {
-  modelType: 'ols' | 'fe' | 'arima';
+  modelType: 'ols' | 'quantile' | 'fe' | 'arima';
   yVar: string;
   xVars: string[];
   options?: {
@@ -13,6 +13,7 @@ interface CodeBridgeProps {
     time?: string;
     orders?: [number, number, number];
     seType?: 'HC0' | 'HC1' | 'HC2' | 'HC3';
+    tau?: number;
   };
 }
 
@@ -49,6 +50,9 @@ export const CodeBridge: React.FC<CodeBridgeProps> = ({ modelType, yVar, xVars, 
         let feCmd = `xtset ${options?.entity} ${options?.time}\nxtreg ${yVar} ${xVars.join(' ')}, fe`;
         if (options?.cluster) feCmd += ` vce(cluster ${options.cluster})`;
         return feCmd;
+      case 'quantile':
+        const tauStata = options?.tau ?? 0.5;
+        return `qreg ${yVar} ${xVars.join(' ')}, quantile(${tauStata})\nbsqreg ${yVar} ${xVars.join(' ')}, quantile(${tauStata}) reps(200)`;
       case 'arima':
         const [p, d, q] = options?.orders || [1, 1, 1];
         return `arima ${yVar}, arima(${p},${d},${q})`;
@@ -71,6 +75,9 @@ export const CodeBridge: React.FC<CodeBridgeProps> = ({ modelType, yVar, xVars, 
       case 'fe':
         const vcovArg = options?.cluster ? `, vcov = ~${options.cluster}` : `, vcov = "iid"`;
         return `library(fixest)\nfe_model <- feols(${yVar} ~ ${xVars.join(' + ')} | ${options?.entity}, data = df${vcovArg})`;
+      case 'quantile':
+        const tauR = options?.tau ?? 0.5;
+        return `library(quantreg)\nqr_model <- rq(${yVar} ~ ${xVars.join(' + ')}, tau = ${tauR}, data = df)\nsummary(qr_model, se = "boot")`;
       case 'arima':
         const [p, d, q] = options?.orders || [1, 1, 1];
         return `library(forecast)\narima_model <- Arima(df$${yVar}, order = c(${p},${d},${q}))`;
@@ -92,6 +99,10 @@ export const CodeBridge: React.FC<CodeBridgeProps> = ({ modelType, yVar, xVars, 
       case 'fe':
         const fitArgs = options?.cluster ? `cov_type='clustered', cluster_entity=True` : `cov_type='unadjusted'`;
         return `from linearmodels import PanelOLS\n\n# Entity and Time indices must be set\ndf = df.set_index(['${options?.entity}', '${options?.time}'])\nmodel = PanelOLS(df['${yVar}'], df[[${xVars.map(v => `'${v}'`).join(', ')}]], entity_effects=True)\nresults = model.fit(${fitArgs})\nprint(results)`;
+      case 'quantile':
+        const tauPy = options?.tau ?? 0.5;
+        const xListQ = xVars.map(v => `'${v}'`).join(', ');
+        return `import statsmodels.formula.api as smf\n\nmodel = smf.quantreg('${yVar} ~ ${xVars.join(' + ')}', df)\nresults = model.fit(q=${tauPy})\nprint(results.summary())`;
       case 'arima':
         const [p, d, q] = options?.orders || [1, 1, 1];
         return `from statsmodels.tsa.arima.model import ARIMA\n\nmodel = ARIMA(df['${yVar}'], order=(${p}, ${d}, ${q}))\nresults = model.fit()\nprint(results.summary())`;
