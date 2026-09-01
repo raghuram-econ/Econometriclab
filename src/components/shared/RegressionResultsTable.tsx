@@ -579,7 +579,10 @@ export default function RegressionResultsTable({
     code += `library(plm)       # For Panel FE/RE Models\n\n`;
     
     code += `# Load original dataset\n`;
-    code += `df <- read.csv("dataset.csv")\n\n`;
+    const safeFilePath = (currentDataset?.name || 'dataset.csv')
+      .replace(/^Uploaded:\s*/, '')
+      .replace(/\\/g, '/');
+    code += `df <- read.csv("${safeFilePath}")\n\n`;
 
     specs.forEach((spec, idx) => {
       code += `# --- Estimation of Model (${idx + 1}) ---\n`;
