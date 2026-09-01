@@ -97,8 +97,9 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
   const codeBridgeOptions = useMemo(() => ({
     robust: useRobust,
     cluster: resultsTableClusterVar,
-    seType: (seEstimator === 'HC0' || seEstimator === 'HC1' || seEstimator === 'HC2' || seEstimator === 'HC3') ? seEstimator : undefined
-  }), [useRobust, resultsTableClusterVar, seEstimator]);
+    seType: (seEstimator === 'HC0' || seEstimator === 'HC1' || seEstimator === 'HC2' || seEstimator === 'HC3') ? seEstimator : undefined,
+    tau: quantileVal
+  }), [useRobust, resultsTableClusterVar, seEstimator, quantileVal]);
 
   const [estimationResults, setEstimationResults] = useState<any>(null);
   const [isEstimating, setIsEstimating] = useState(false);
@@ -994,8 +995,8 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
                 <Code className="w-5 h-5 text-indigo-500" />
                 <h4 className="text-sm font-bold uppercase tracking-tight text-slate-900">Institutional Reproducibility Code</h4>
              </div>
-             <CodeBridge
-                modelType="ols"
+                          <CodeBridge
+                modelType={regressionMode === 'quantile' ? 'quantile' : 'ols'}
                 yVar={dependentVar}
                 xVars={independentVars}
                 options={codeBridgeOptions}
