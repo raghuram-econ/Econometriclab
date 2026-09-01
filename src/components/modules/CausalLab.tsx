@@ -1534,6 +1534,7 @@ export default function CausalLab({ dataset, onRunComplete }: CausalLabProps) {
                         modelType: "iv",
                         yVariable: ivOutcome,
                         xVariables: [ivEndogenous, ...ivControls],
+                        filePath: dataset?.name,
                         options: {
                           instruments: [ivInstrument]
                         }
