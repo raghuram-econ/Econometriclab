@@ -506,6 +506,7 @@ export default function GLMLab({ dataset: propDataset, onRunComplete }: GLMLabPr
                     modelType: family,
                     yVariable: yVar,
                     xVariables: xVars,
+                    filePath: propDataset?.name,
                     options: {}
                   }}
                 />
