@@ -745,6 +745,7 @@ export default function ARIMALab({ dataset, onRunComplete, isLoading }: ARIMALab
                           modelType: "arima",
                           yVariable: targetVar,
                           xVariables: [],
+                          filePath: dataset?.name,
                           options: {
                             orders: [p, d, q]
                           }
