@@ -7,6 +7,7 @@ export interface ShowCodeProps {
     modelType: "ols" | "logit" | "probit" | "panel_fe" | "panel_re" | "iv" | "arima" | "survival_cox" | "poisson" | "negbin" | "tobit";
     yVariable: string;
     xVariables: string[];
+    filePath?: string;
     options?: {
       robust?: boolean;
       clusterVar?: string;
@@ -25,7 +26,14 @@ export default function ShowCode({ parameters }: ShowCodeProps) {
   const [activeTab, setActiveTab] = useState<'stata' | 'r' | 'python'>('stata');
   const [copied, setCopied] = useState(false);
 
-  const { modelType, yVariable, xVariables, options = {} } = parameters;
+  const { modelType, yVariable, xVariables, filePath, options = {} } = parameters;
+  // filePath is a UI display label when present (e.g. "Uploaded: wage1.csv"),
+  // not a raw filename, and backslashes in a Windows path break R's parser --
+  // strip the prefix and normalize slashes the same way as the other
+  // code-generators in this app (ReplicationCodeTab.tsx, StatsInterpreterLab.tsx).
+  const safeFilePath = (filePath || 'your_data.csv')
+    .replace(/^Uploaded:\s*/, '')
+    .replace(/\\/g, '/');
   const y = yVariable || 'y';
   const xVars = xVariables && xVariables.length > 0 ? xVariables : ['x1', 'x2', 'x3'];
   const robust = options.robust ?? false;
