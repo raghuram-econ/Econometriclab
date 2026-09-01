@@ -94,18 +94,18 @@ export default function OLSLab({ dataset: globalDataset, onRunComplete, isLoadin
     seType: seEstimator
   }), [useRobust, resultsTableClusterVar, seEstimator]);
 
+  const [estimationResults, setEstimationResults] = useState<any>(null);
+  const [isEstimating, setIsEstimating] = useState(false);
+  const [regressionMode, setRegressionMode] = useState<'ols' | 'quantile'>('ols');
+  const [quantileVal, setQuantileVal] = useState<number>(0.5);
+  const [estimationError, setEstimationError] = useState<string | null>(null);
+
   const codeBridgeOptions = useMemo(() => ({
     robust: useRobust,
     cluster: resultsTableClusterVar,
     seType: (seEstimator === 'HC0' || seEstimator === 'HC1' || seEstimator === 'HC2' || seEstimator === 'HC3') ? seEstimator : undefined,
     tau: quantileVal
   }), [useRobust, resultsTableClusterVar, seEstimator, quantileVal]);
-
-  const [estimationResults, setEstimationResults] = useState<any>(null);
-  const [isEstimating, setIsEstimating] = useState(false);
-  const [regressionMode, setRegressionMode] = useState<'ols' | 'quantile'>('ols');
-  const [quantileVal, setQuantileVal] = useState<number>(0.5);
-  const [estimationError, setEstimationError] = useState<string | null>(null);
 
   // Complex Survey Design states
   const [enableSurvey, setEnableSurvey] = useState<boolean>(false);
