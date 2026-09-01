@@ -777,34 +777,37 @@ function StatsInterpreterLabComponent() {
   const getReproducibleCode = (lang: 'R' | 'Stata' | 'Python'): string => {
     const y = depVar || 'y';
     const xs = (indepVars?.length ?? 0) > 0 ? indepVars : ['x1', 'x2', 'x3'];
+    const safeFilePath = (currentDataset?.name || 'dataset.csv')
+      .replace(/^Uploaded:\s*/, '')
+      .replace(/\\/g, '/');
     
     switch (lang) {
       case 'R':
         if (analysisType === 'Panel FE') {
-          return `# R Script - Panel FE Regression\nlibrary(plm)\ndata <- read.csv("dataset.csv")\n\n# Fit Fixed-Effects model\nfe_model <- plm(${y} ~ ${xs.join(' + ')}, data = data, index = c("${entityVar || 'id'}", "${timeVar || 'time'}"), model = "within")\nsummary(fe_model)`;
+          return `# R Script - Panel FE Regression\nlibrary(plm)\ndata <- read.csv("${safeFilePath}")\n\n# Fit Fixed-Effects model\nfe_model <- plm(${y} ~ ${xs.join(' + ')}, data = data, index = c("${entityVar || 'id'}", "${timeVar || 'time'}"), model = "within")\nsummary(fe_model)`;
         }
         if (analysisType === 'Logit') {
-          return `# R Script - Binary Logit Regression\ndata <- read.csv("dataset.csv")\nlogit_model <- glm(${y} ~ ${xs.join(' + ')}, data = data, family = binomial(link = "logit"))\nsummary(logit_model)`;
+          return `# R Script - Binary Logit Regression\ndata <- read.csv("${safeFilePath}")\nlogit_model <- glm(${y} ~ ${xs.join(' + ')}, data = data, family = binomial(link = "logit"))\nsummary(logit_model)`;
         }
-        return `# R Script - OLS Regression\ndata <- read.csv("dataset.csv")\nols_model <- lm(${y} ~ ${xs.join(' + ')}, data = data)\nsummary(ols_model)`;
+        return `# R Script - OLS Regression\ndata <- read.csv("${safeFilePath}")\nols_model <- lm(${y} ~ ${xs.join(' + ')}, data = data)\nsummary(ols_model)`;
       
       case 'Stata':
         if (analysisType === 'Panel FE') {
-          return `* Stata Script - Panel FE Regression\nimport delimited "dataset.csv", clear\nxtset ${entityVar || 'id'} ${timeVar || 'time'}\nxtreg ${y} ${xs.join(' ')}, fe`;
+          return `* Stata Script - Panel FE Regression\nimport delimited "${safeFilePath}", clear\nxtset ${entityVar || 'id'} ${timeVar || 'time'}\nxtreg ${y} ${xs.join(' ')}, fe`;
         }
         if (analysisType === 'Logit') {
-          return `* Stata Script - Logistic Regression\nimport delimited "dataset.csv", clear\nlogit ${y} ${xs.join(' ')}`;
+          return `* Stata Script - Logistic Regression\nimport delimited "${safeFilePath}", clear\nlogit ${y} ${xs.join(' ')}`;
         }
-        return `* Stata Script - Linear Regression\nimport delimited "dataset.csv", clear\nregress ${y} ${xs.join(' ')}`;
+        return `* Stata Script - Linear Regression\nimport delimited "${safeFilePath}", clear\nregress ${y} ${xs.join(' ')}`;
 
       case 'Python':
         if (analysisType === 'Panel FE') {
-          return `# Python Script - Panel FE\nimport pandas as pd\nfrom linearmodels.panel import PanelOLS\n\ndf = pd.read_csv("dataset.csv")\ndf = df.set_index(["${entityVar || 'id'}", "${timeVar || 'time'}"])\n\nmod = PanelOLS(df["${y}"], df[[${xs.map(x => `"${x}"`).join(', ')}]], entity_effects=True)\nres = mod.fit()\nprint(res.summary)`;
+          return `# Python Script - Panel FE\nimport pandas as pd\nfrom linearmodels.panel import PanelOLS\n\ndf = pd.read_csv("${safeFilePath}")\ndf = df.set_index(["${entityVar || 'id'}", "${timeVar || 'time'}"])\n\nmod = PanelOLS(df["${y}"], df[[${xs.map(x => `"${x}"`).join(', ')}]], entity_effects=True)\nres = mod.fit()\nprint(res.summary)`;
         }
         if (analysisType === 'Logit') {
-          return `# Python Script - Logistic Regression\nimport pandas as pd\nimport statsmodels.api as sm\n\ndf = pd.read_csv("dataset.csv")\nX = sm.add_constant(df[[${xs.map(x => `"${x}"`).join(', ')}]])\ny = df["${y}"]\n\nmodel = sm.Logit(y, X).fit()\nprint(model.summary())`;
+          return `# Python Script - Logistic Regression\nimport pandas as pd\nimport statsmodels.api as sm\n\ndf = pd.read_csv("${safeFilePath}")\nX = sm.add_constant(df[[${xs.map(x => `"${x}"`).join(', ')}]])\ny = df["${y}"]\n\nmodel = sm.Logit(y, X).fit()\nprint(model.summary())`;
         }
-        return `# Python Script - Ordinary Least Squares\nimport pandas as pd\nimport statsmodels.api as sm\n\ndf = pd.read_csv("dataset.csv")\nX = sm.add_constant(df[[${xs.map(x => `"${x}"`).join(', ')}]])\ny = df["${y}"]\n\nmodel = sm.OLS(y, X).fit()\nprint(model.summary())`;
+        return `# Python Script - Ordinary Least Squares\nimport pandas as pd\nimport statsmodels.api as sm\n\ndf = pd.read_csv("${safeFilePath}")\nX = sm.add_constant(df[[${xs.map(x => `"${x}"`).join(', ')}]])\ny = df["${y}"]\n\nmodel = sm.OLS(y, X).fit()\nprint(model.summary())`;
     }
   };
 
