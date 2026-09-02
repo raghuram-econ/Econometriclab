@@ -594,17 +594,12 @@ function StatsInterpreterLabComponent() {
            adjRSquared: modelOutput.adjRSquared != null ? modelOutput.adjRSquared.toFixed(4) : "N/A",
            fStatistic: modelOutput.fStat != null ? modelOutput.fStat.toFixed(2) : "N/A",
            fDf1: modelOutput.fPValue != null ? (modelOutput.coefficients.length - 1).toString() : "N/A",
-           fDf2: modelOutput.df?.toString() || "0",
--          fPValue: modelOutput.fPValue != null ? (modelOutput.fPValue < 0.001 ? "< 0.001" : modelOutput.fPValue.toFixed(4)) : "N/A"
-+          fPValue: modelOutput.fPValue != null ? (modelOutput.fPValue < 0.001 ? "< 0.001" : modelOutput.fPValue.toFixed(4)) : "N/A",
-+          // modelOutput.rSquared already holds a real McFadden pseudo-R^2
-+          // for Logit/Probit (computed from logLikelihood/nullLogLikelihood
-+          // in estimators.ts) -- gate it here so OLS-family models never
-+          // get this field at all.
-+          ...((analysisType === 'Logit' || analysisType === 'Probit') && modelOutput.rSquared != null
-+            ? { pseudoRSquared: modelOutput.rSquared.toFixed(4) }
-+            : {})
-         },
+          fDf2: modelOutput.df?.toString() || "0",
+          fPValue: modelOutput.fPValue != null ? (modelOutput.fPValue < 0.001 ? "< 0.001" : modelOutput.fPValue.toFixed(4)) : "N/A",
+          ...((analysisType === 'Logit' || analysisType === 'Probit') && modelOutput.rSquared != null
+            ? { pseudoRSquared: modelOutput.rSquared.toFixed(4) }
+            : {})
+        },
         assumptions: [
           {
             testName: "Breusch-Pagan Test (Heteroskedasticity)",
