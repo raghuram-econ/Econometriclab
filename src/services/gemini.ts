@@ -716,17 +716,21 @@ export interface CoefficientResult {
   ciUpper: string;
   stars: string;
 }
+ export interface DiagnosticsResult {
+   residualStdError: string;
+   df: string;
+   rSquared: string;
+   adjRSquared: string;
+   fStatistic: string;
+   fDf1: string;
+   fDf2: string;
+   fPValue: string;
++  // Only present for binary-outcome models (Logit/Probit). A real
++  // McFadden pseudo-R^2 computed from log-likelihoods -- never a
++  // duplicate of the OLS-family `rSquared` above.
++  pseudoRSquared?: string;
+ }
 
-export interface DiagnosticsResult {
-  residualStdError: string;
-  df: string;
-  rSquared: string;
-  adjRSquared: string;
-  fStatistic: string;
-  fDf1: string;
-  fDf2: string;
-  fPValue: string;
-}
 
 export interface AssumptionResult {
   testName: string;
