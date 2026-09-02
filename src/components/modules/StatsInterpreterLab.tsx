@@ -587,16 +587,24 @@ function StatsInterpreterLabComponent() {
             stars: c.stars || ''
           };
         }),
-        diagnostics: {
-          residualStdError: modelOutput.rmse != null ? modelOutput.rmse.toFixed(4) : "N/A",
-          df: modelOutput.df?.toString() || "0",
-          rSquared: modelOutput.rSquared != null ? modelOutput.rSquared.toFixed(4) : "N/A",
-          adjRSquared: modelOutput.adjRSquared != null ? modelOutput.adjRSquared.toFixed(4) : "N/A",
-          fStatistic: modelOutput.fStat != null ? modelOutput.fStat.toFixed(2) : "N/A",
-          fDf1: modelOutput.fPValue != null ? (modelOutput.coefficients.length - 1).toString() : "N/A",
-          fDf2: modelOutput.df?.toString() || "0",
-          fPValue: modelOutput.fPValue != null ? (modelOutput.fPValue < 0.001 ? "< 0.001" : modelOutput.fPValue.toFixed(4)) : "N/A"
-        },
+         diagnostics: {
+           residualStdError: modelOutput.rmse != null ? modelOutput.rmse.toFixed(4) : "N/A",
+           df: modelOutput.df?.toString() || "0",
+           rSquared: modelOutput.rSquared != null ? modelOutput.rSquared.toFixed(4) : "N/A",
+           adjRSquared: modelOutput.adjRSquared != null ? modelOutput.adjRSquared.toFixed(4) : "N/A",
+           fStatistic: modelOutput.fStat != null ? modelOutput.fStat.toFixed(2) : "N/A",
+           fDf1: modelOutput.fPValue != null ? (modelOutput.coefficients.length - 1).toString() : "N/A",
+           fDf2: modelOutput.df?.toString() || "0",
+-          fPValue: modelOutput.fPValue != null ? (modelOutput.fPValue < 0.001 ? "< 0.001" : modelOutput.fPValue.toFixed(4)) : "N/A"
++          fPValue: modelOutput.fPValue != null ? (modelOutput.fPValue < 0.001 ? "< 0.001" : modelOutput.fPValue.toFixed(4)) : "N/A",
++          // modelOutput.rSquared already holds a real McFadden pseudo-R^2
++          // for Logit/Probit (computed from logLikelihood/nullLogLikelihood
++          // in estimators.ts) -- gate it here so OLS-family models never
++          // get this field at all.
++          ...((analysisType === 'Logit' || analysisType === 'Probit') && modelOutput.rSquared != null
++            ? { pseudoRSquared: modelOutput.rSquared.toFixed(4) }
++            : {})
+         },
         assumptions: [
           {
             testName: "Breusch-Pagan Test (Heteroskedasticity)",
@@ -614,12 +622,12 @@ function StatsInterpreterLabComponent() {
               ? (Math.max(...Object.values(modelOutput.vifs)) > 10 ? "Warn" : "Pass")
               : "N/A"
           },
-          {
+          ...(['ARIMA', 'Panel FE', 'Panel RE'].includes(analysisType) ? [{
             testName: "Durbin-Watson Test (Serial Correlation)",
             statistic: modelOutput.durbinWatson != null ? `d = ${modelOutput.durbinWatson.toFixed(2)}` : "Not computed for this model",
             pValue: "N/A",
             verdict: modelOutput.durbinWatson !== undefined ? (modelOutput.durbinWatson < 1.4 || modelOutput.durbinWatson > 2.6 ? "Warn" : "Pass") : "N/A"
-          }
+          }] : [])
         ],
         apaParagraph: `An empirical estimation was conducted using ${analysisType} regression. The dependent variable was ${depVar}, and regressors included: ${indepVars.join(', ')}. The model converged successfully with N = ${modelOutput.n} observations. Goodness-of-fit indicators suggest the model explains ${((modelOutput.rSquared || 0) * 100).toFixed(2)}% of the total variations. The most significant predictors were evaluated. Standard diagnostic audits indicated model validity. Click 'Interpret Output' to fetch comprehensive senior-level AI qualitative review.`
       };
@@ -1489,7 +1497,7 @@ function StatsInterpreterLabComponent() {
                   <h4 className="text-xs font-bold text-[#1a2744] uppercase tracking-wider font-mono">II. MODEL SUMMARY & GOODNESS OF FIT</h4>
                   <div className="font-mono text-[11px] text-slate-800 bg-[#f2f4f8] border border-slate-200 rounded p-4 whitespace-pre-wrap leading-relaxed">
                     Residual standard error: {renderStatValue(result?.diagnostics?.residualStdError)} on {renderStatValue(result?.diagnostics?.df)} degrees of freedom{'\n'}
-                    R-squared:                {renderStatValue(result?.diagnostics?.rSquared)} (Pseudo/Nagelkerke: {renderStatValue(result?.diagnostics?.rSquared)}){'\n'}
+                    R-squared:                {renderStatValue(result?.diagnostics?.rSquared)}{result?.diagnostics?.pseudoRSquared != null ? ` (McFadden Pseudo R²: ${renderStatValue(result.diagnostics.pseudoRSquared)})` : ''}{'\n'}               
                     Adjusted R-squared:       {renderStatValue(result?.diagnostics?.adjRSquared)}{'\n'}
                     F-statistic:              {renderStatValue(result?.diagnostics?.fStatistic)} on {renderStatValue(result?.diagnostics?.fDf1)} and {renderStatValue(result?.diagnostics?.fDf2)} DF, p-value: {renderStatValue(result?.diagnostics?.fPValue)}
                   </div>
