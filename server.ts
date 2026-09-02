@@ -215,7 +215,7 @@ async function startServer() {
   // Rate limiters (reads headers and auth, no body parsing needed)
   const estimationLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 30,
+    max: 60,
     keyGenerator: (req: any) => req.user?.sub || ipKeyGenerator(req.ip) || 'anonymous',
     message: { error: "Too many estimation requests. Please wait a minute before trying again." },
     standardHeaders: true,
