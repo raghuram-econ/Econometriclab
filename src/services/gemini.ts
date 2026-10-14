@@ -298,30 +298,6 @@ function getLocalQuizQuestions(): any[] {
   ];
 }
 
-function getLocalStatsInterpretation(
-  toolType: string,
-  analysisType: string,
-  rawOutput: string,
-  researchContext?: string
-): StatsInterpretationResult {
-  return {
-    coefficients: [],
-    diagnostics: {
-      residualStdError: "N/A",
-      df: "N/A",
-      rSquared: "N/A",
-      adjRSquared: "N/A",
-      fStatistic: "N/A",
-      fDf1: "N/A",
-      fDf2: "N/A",
-      fPValue: "N/A"
-    },
-    assumptions: [],
-    apaParagraph: `[API Quota Exhausted] The AI interpretation engine is currently unavailable due to API quota limits. Please review the raw software output for your coefficients and model fit statistics. We cannot parse the raw text output automatically without the AI engine.`
-  };
-}
-
-
 export interface WorkspaceRunSummary {
   module: string;
   specification: string;
@@ -798,13 +774,13 @@ export async function interpretStatsOutput(
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `Server returned status ${response.status}`);
+      throw new Error(errorData.error || `Stats interpreter server returned status ${response.status}`);
     }
 
     return await response.json();
   } catch (error: any) {
-    if (error?.status !== 429 && !error?.message?.includes('429')) console.error("Stats Interpreter Live API Error (using high-fidelity local fallback):", error);
-    return getLocalStatsInterpretation(toolType, analysisType, rawOutput, researchContext);
+    console.error("Stats interpreter request failed:", error?.message || error);
+    throw error instanceof Error ? error : new Error("Stats interpreter request failed. Please retry.");
   }
 }
 
