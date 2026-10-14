@@ -3,9 +3,9 @@
 # In the Render dashboard: New + → Blueprint → point it at this repository.
 # Render reads this file and creates both services automatically.
 #
-# After the first deploy, set GEMINI_API_KEY on the node service
-# (Dashboard → econometrics-lab → Environment) if you want the AI
-# features; the statistical engine works without it.
+# After the first deploy, set OPENROUTER_API_KEY on the node service
+# (Dashboard → econometrics-lab → Environment). It powers AI features;
+# the local statistical engine works without it.
 
 
 services:
@@ -28,7 +28,7 @@ services:
           name: econometrics-lab-python
           envVarKey: RENDER_EXTERNAL_URL
       - fromGroup: econometrics-shared
-      - key: GEMINI_API_KEY
+      - key: OPENROUTER_API_KEY
         sync: false
 
 
