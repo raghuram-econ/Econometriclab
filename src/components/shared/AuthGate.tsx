@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
+  ArrowDown,
   BarChart3,
   Sparkles,
   FileText,
@@ -8,7 +9,14 @@ import {
   TrendingUp,
   User as UserIcon
 } from "lucide-react";
-import { signInAsGuest, signInWithPassword, signUpWithPassword } from "../../services/authService";
+import {
+  requestPasswordReset,
+  signInAsGuest,
+  signInWithPassword,
+  signUpWithPassword,
+  subscribeToPasswordRecovery,
+  updateAccountPassword,
+} from "../../services/authService";
 import { useStore } from "../../store/useStore";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
@@ -20,6 +28,28 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [isSigningInGuest, setIsSigningInGuest] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(
+    () => new URLSearchParams(window.location.hash.slice(1)).get("type") === "recovery",
+  );
+  const [isRequestingReset, setIsRequestingReset] = useState(false);
+
+  useEffect(() => {
+    const syncRecoveryState = () => {
+      if (new URLSearchParams(window.location.hash.slice(1)).get("type") === "recovery") {
+        setIsPasswordRecovery(true);
+        setError("");
+        setMessage("");
+      }
+    };
+
+    syncRecoveryState();
+    const unsubscribe = subscribeToPasswordRecovery(syncRecoveryState);
+    window.addEventListener("hashchange", syncRecoveryState);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("hashchange", syncRecoveryState);
+    };
+  }, []);
 
   const handleAccountAuth = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -28,7 +58,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setMessage("");
 
     try {
-      if (authMode === "sign-up") {
+      if (isPasswordRecovery) {
+        await updateAccountPassword(password);
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+        setIsPasswordRecovery(false);
+        setPassword("");
+      } else if (authMode === "sign-up") {
         const result = await signUpWithPassword(email.trim(), password);
         if (result.requiresEmailConfirmation) {
           setMessage("Account created. Check your email to confirm your address, then sign in.");
@@ -40,6 +75,26 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setError(e.message || "Unable to sign in. Please try again.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleRequestPasswordReset = async () => {
+    if (!email.trim()) {
+      setError("Enter your email address first.");
+      setMessage("");
+      return;
+    }
+
+    setIsRequestingReset(true);
+    setError("");
+    setMessage("");
+    try {
+      await requestPasswordReset(email.trim());
+      setMessage("If an account exists for that email, a password reset link has been sent.");
+    } catch (e: any) {
+      setError(e.message || "Unable to send a password reset link. Please try again.");
+    } finally {
+      setIsRequestingReset(false);
     }
   };
 
@@ -57,7 +112,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  if (isHydrated && user) return <>{children}</>;
+  if (isHydrated && user && !isPasswordRecovery) return <>{children}</>;
 
   const features = [
     {
@@ -106,6 +161,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             get AI-powered interpretations, and generate research-ready
             citations — all in your browser.
           </p>
+
+          <a
+            href="#scholar-access"
+            className="mb-8 inline-flex w-fit items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-emerald-400 md:hidden"
+          >
+            Sign in or create an account
+            <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
 
           {/* Estimator tags */}
           <div className="flex flex-wrap gap-2 mb-10">
@@ -157,7 +220,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
       {/* RIGHT PANEL */}
       <motion.div
-        className="w-full md:w-2/5 bg-white flex flex-col justify-center px-8 md:px-12 py-12"
+        id="scholar-access"
+        className="w-full scroll-mt-8 md:w-2/5 bg-white flex flex-col justify-center px-8 md:px-12 py-12"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.2, duration: 0.5 }}
@@ -170,10 +234,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
           {/* Heading */}
           <h2 className="text-slate-900 text-2xl font-semibold mb-2">
-            Sign in to your research environment.
+            {isPasswordRecovery ? "Choose a new password" : "Sign in to your research environment."}
           </h2>
           <p className="text-slate-500 text-sm mb-6">
-            Sign in to use your research environment and AI tools.
+            {isPasswordRecovery
+              ? "Enter a new password for your account."
+              : "Sign in to use your research environment and AI tools."}
           </p>
 
           {error && <p className="text-red-600 text-xs mb-3" role="alert">{error}</p>}
@@ -197,20 +263,32 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             </div>
             <div>
               <label htmlFor="auth-password" className="block text-xs font-medium text-slate-700 mb-1">
-                Password
+                {isPasswordRecovery ? "New password" : "Password"}
               </label>
               <input
                 id="auth-password"
                 type="password"
-                autoComplete={authMode === "sign-in" ? "current-password" : "new-password"}
+                autoComplete={authMode === "sign-in" && !isPasswordRecovery ? "current-password" : "new-password"}
                 required
-                minLength={authMode === "sign-up" ? 6 : undefined}
+                minLength={authMode === "sign-up" || isPasswordRecovery ? 6 : undefined}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                 placeholder="Password"
               />
             </div>
+            {authMode === "sign-in" && !isPasswordRecovery && (
+              <div className="-mt-1 text-right">
+                <button
+                  type="button"
+                  onClick={handleRequestPasswordReset}
+                  disabled={isRequestingReset}
+                  className="text-xs font-medium text-emerald-700 hover:text-emerald-800 disabled:opacity-50"
+                >
+                  {isRequestingReset ? "Sending reset link..." : "Forgot password?"}
+                </button>
+              </div>
+            )}
             <button
               type="submit"
               disabled={isSubmitting}
@@ -218,46 +296,54 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             >
               {isSubmitting
                 ? (authMode === "sign-in" ? "Signing in..." : "Creating account...")
-                : (authMode === "sign-in" ? "Sign in with email" : "Create account")}
+                : isPasswordRecovery
+                  ? "Update password"
+                  : (authMode === "sign-in" ? "Sign in with email" : "Create account")}
             </button>
           </form>
 
-          <button
-            type="button"
-            onClick={() => {
-              setAuthMode(authMode === "sign-in" ? "sign-up" : "sign-in");
-              setError("");
-              setMessage("");
-            }}
-            className="w-full text-center text-xs font-medium text-emerald-700 hover:text-emerald-800 mb-5"
-          >
-            {authMode === "sign-in" ? "New here? Create an account" : "Already have an account? Sign in"}
-          </button>
+          {!isPasswordRecovery && (
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode(authMode === "sign-in" ? "sign-up" : "sign-in");
+                setError("");
+                setMessage("");
+              }}
+              className="w-full text-center text-xs font-medium text-emerald-700 hover:text-emerald-800 mb-5"
+            >
+              {authMode === "sign-in" ? "New here? Create an account" : "Already have an account? Sign in"}
+            </button>
+          )}
 
-          <div className="flex items-center gap-3 mb-5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
-            <span className="h-px flex-1 bg-slate-200" />
-            or continue locally
-            <span className="h-px flex-1 bg-slate-200" />
-          </div>
+          {!isPasswordRecovery && (
+            <>
+              <div className="flex items-center gap-3 mb-5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+                <span className="h-px flex-1 bg-slate-200" />
+                or continue as a guest
+                <span className="h-px flex-1 bg-slate-200" />
+              </div>
 
-          {/* Guest Sign-in button */}
-          <motion.button
-            onClick={handleSignInGuest}
-            disabled={isSigningInGuest}
-            className="w-full flex items-center justify-center gap-2 bg-slate-900 border border-slate-900 rounded-xl py-3 px-4 text-white font-semibold text-xs hover:bg-slate-800 transition-all duration-200 disabled:opacity-50 mb-6"
-            initial={{ scale: 0.97 }}
-            animate={{ scale: 1 }}
-            transition={{ delay: 0.5, type: "spring", stiffness: 300 }}
-          >
-            <UserIcon className="w-4 h-4" />
-            {isSigningInGuest ? "Launching Sandbox..." : "Continue as Guest (Local Sandbox)"}
-          </motion.button>
+              {/* Guest Sign-in button */}
+              <motion.button
+                onClick={handleSignInGuest}
+                disabled={isSigningInGuest}
+                className="w-full flex items-center justify-center gap-2 bg-slate-900 border border-slate-900 rounded-xl py-3 px-4 text-white font-semibold text-xs hover:bg-slate-800 transition-all duration-200 disabled:opacity-50 mb-6"
+                initial={{ scale: 0.97 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: 0.5, type: "spring", stiffness: 300 }}
+              >
+                <UserIcon className="w-4 h-4" />
+                {isSigningInGuest ? "Launching Sandbox..." : "Continue as Guest"}
+              </motion.button>
+            </>
+          )}
 
           {/* Privacy note */}
           <div className="flex items-start gap-2 mb-8">
             <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
             <p className="text-slate-400 text-xs leading-relaxed">
-              Your datasets stay in your browser and are never uploaded to any server.
+              Saved datasets stay in this browser. Running a model sends the required data to our compute server; AI requests send your prompt and supporting analysis context to our server and OpenRouter. Workspace details and model history may sync to Supabase while a session is active. Avoid sensitive or confidential data.
             </p>
           </div>
 
