@@ -8,17 +8,45 @@ import {
   TrendingUp,
   User as UserIcon
 } from "lucide-react";
-import { signInAsGuest } from "../../services/authService";
+import { signInAsGuest, signInWithPassword, signUpWithPassword } from "../../services/authService";
 import { useStore } from "../../store/useStore";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { isHydrated, user, setMockUser } = useStore();
+  const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSigningInGuest, setIsSigningInGuest] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const handleAccountAuth = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setError("");
+    setMessage("");
+
+    try {
+      if (authMode === "sign-up") {
+        const result = await signUpWithPassword(email.trim(), password);
+        if (result.requiresEmailConfirmation) {
+          setMessage("Account created. Check your email to confirm your address, then sign in.");
+        }
+      } else {
+        await signInWithPassword(email.trim(), password);
+      }
+    } catch (e: any) {
+      setError(e.message || "Unable to sign in. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleSignInGuest = async () => {
     setIsSigningInGuest(true);
     setError("");
+    setMessage("");
     try {
       const guestUser = await signInAsGuest();
       setMockUser(guestUser);
@@ -144,11 +172,73 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           <h2 className="text-slate-900 text-2xl font-semibold mb-2">
             Sign in to your research environment.
           </h2>
-          <p className="text-slate-500 text-sm mb-8">
-            Free for MA, MPhil & PhD Scholars.
+          <p className="text-slate-500 text-sm mb-6">
+            Sign in to use your research environment and AI tools.
           </p>
 
-          {error && <p className="text-red-500 text-xs mb-4">{error}</p>}
+          {error && <p className="text-red-600 text-xs mb-3" role="alert">{error}</p>}
+          {message && <p className="text-emerald-700 text-xs mb-3" role="status">{message}</p>}
+
+          <form onSubmit={handleAccountAuth} className="space-y-3 mb-4">
+            <div>
+              <label htmlFor="auth-email" className="block text-xs font-medium text-slate-700 mb-1">
+                Email
+              </label>
+              <input
+                id="auth-email"
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                placeholder="you@example.com"
+              />
+            </div>
+            <div>
+              <label htmlFor="auth-password" className="block text-xs font-medium text-slate-700 mb-1">
+                Password
+              </label>
+              <input
+                id="auth-password"
+                type="password"
+                autoComplete={authMode === "sign-in" ? "current-password" : "new-password"}
+                required
+                minLength={authMode === "sign-up" ? 6 : undefined}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                placeholder="Password"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {isSubmitting
+                ? (authMode === "sign-in" ? "Signing in..." : "Creating account...")
+                : (authMode === "sign-in" ? "Sign in with email" : "Create account")}
+            </button>
+          </form>
+
+          <button
+            type="button"
+            onClick={() => {
+              setAuthMode(authMode === "sign-in" ? "sign-up" : "sign-in");
+              setError("");
+              setMessage("");
+            }}
+            className="w-full text-center text-xs font-medium text-emerald-700 hover:text-emerald-800 mb-5"
+          >
+            {authMode === "sign-in" ? "New here? Create an account" : "Already have an account? Sign in"}
+          </button>
+
+          <div className="flex items-center gap-3 mb-5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+            <span className="h-px flex-1 bg-slate-200" />
+            or continue locally
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
 
           {/* Guest Sign-in button */}
           <motion.button
