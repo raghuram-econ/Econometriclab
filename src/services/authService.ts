@@ -24,6 +24,32 @@ export async function signUpWithPassword(email: string, password: string) {
   return { user: data.user, requiresEmailConfirmation: !data.session };
 }
 
+export async function requestPasswordReset(email: string) {
+  if (!supabase) throw new Error('Password recovery is not configured. Check the Supabase URL and anon key in Render.');
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin,
+  });
+  if (error) throw error;
+}
+
+export async function updateAccountPassword(password: string) {
+  if (!supabase) throw new Error('Password recovery is not configured. Check the Supabase URL and anon key in Render.');
+
+  const { data, error } = await supabase.auth.updateUser({ password });
+  if (error) throw error;
+  return data.user;
+}
+
+export function subscribeToPasswordRecovery(callback: () => void) {
+  if (!supabase) return () => {};
+
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    if (event === "PASSWORD_RECOVERY") callback();
+  });
+  return () => subscription.unsubscribe();
+}
+
 export async function signInAsGuest() {
   if (!supabase) throw new Error('Guest sign-in is unavailable. Check the Supabase URL and anon key in Render.');
 
