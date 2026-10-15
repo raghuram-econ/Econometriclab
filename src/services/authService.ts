@@ -1,60 +1,60 @@
 import { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 
-// signInWithGoogle and signInWithExistingCredential (Firebase OAuth flows)
-// were removed here: confirmed zero callers anywhere in the app before this
-// migration (guest-only mode has been the sole sign-in path since the
-// AuthGate simplification), so there was nothing to port.
+// Email/password accounts use a real Supabase session, which supplies the JWT
+// required by the server-side API. Never send credentials to the app server.
+export async function signInWithPassword(email: string, password: string) {
+  if (!supabase) throw new Error('Authentication is not configured. Check the Supabase URL and anon key in Render.');
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  if (!data.user || !data.session) throw new Error('Supabase did not return a sign-in session.');
+  return data.user;
+}
+
+export async function signUpWithPassword(email: string, password: string) {
+  if (!supabase) throw new Error('Authentication is not configured. Check the Supabase URL and anon key in Render.');
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: window.location.origin },
+  });
+  if (error) throw error;
+  return { user: data.user, requiresEmailConfirmation: !data.session };
+}
 
 export async function signInAsGuest() {
+  if (!supabase) throw new Error('Guest sign-in is unavailable. Check the Supabase URL and anon key in Render.');
+
   try {
-    // signInAnonymously can hang indefinitely (rather than reject) if the
-    // Supabase project's auth backend is unreachable, misconfigured, or has
-    // anonymous sign-ins disabled -- race it against a timeout so "Continue
-    // as Guest" always resolves within a bounded time instead of getting
-    // stuck on "Launching Sandbox..." forever.
+    // Bound this request so a misconfigured Supabase project cannot leave the
+    // guest button spinning indefinitely.
     const { data, error } = await Promise.race([
       supabase.auth.signInAnonymously(),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('signInAnonymously timed out')), 6000)
+        setTimeout(() => reject(new Error('Supabase anonymous sign-in timed out')), 6000)
       ),
     ]);
     if (error) throw error;
-    if (!data.user) throw new Error('signInAnonymously returned no user');
+    if (!data.user || !data.session) throw new Error('Supabase returned no anonymous session.');
     return data.user;
   } catch (error) {
-    console.warn('Supabase anonymous sign-in failed, disabled, or timed out -- falling back to local mock user:', error);
-    const mockUser = {
-      id: 'guest-scholar',
-      email: 'guest@econometricslab.org',
-      is_anonymous: true,
-      aud: 'authenticated',
-      role: 'authenticated',
-      app_metadata: {},
-      user_metadata: { displayName: 'Guest Scholar' },
-      identities: [],
-      created_at: new Date().toISOString(),
-    } as unknown as User;
-    return mockUser;
+    console.warn('Supabase anonymous sign-in failed:', error);
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Guest sign-in failed: ${reason}. Use email sign-in, or enable Anonymous Sign-ins in Supabase.`);
   }
 }
 
 export function subscribeToAuth(callback: (user: User | null) => void) {
   // If Supabase failed to initialize (no env config), report "signed out"
-  // asynchronously so the app still hydrates and the guest flow works.
+  // asynchronously so AuthGate can render the sign-in and setup guidance.
   if (!supabase) {
     const timer = setTimeout(() => callback(null), 0);
     return () => clearTimeout(timer);
   }
 
-  // onAuthStateChange's first callback can hang indefinitely if Supabase's
-  // persistence-layer check (localStorage/session restore) never resolves --
-  // the same class of issue signInAnonymously has, but with no existing
-  // fallback at all, so the app's `isHydrated` flag would never flip and
-  // even a successful guest-mode sign-in downstream could never render past
-  // the auth gate. Force a "signed out" callback after a timeout if Supabase
-  // hasn't reported anything yet; if the real callback fires later, let it
-  // through too (harmless -- it just updates state again).
+  // Bound initial auth hydration in case Supabase's session restore stalls.
   let fired = false;
   const timer = setTimeout(() => {
     if (!fired) {
@@ -80,9 +80,6 @@ export async function signOut() {
   await supabase.auth.signOut();
 }
 
-// Supabase has no per-user getIdToken() like Firebase; the current access
-// token lives on the session instead. apiClient.ts uses this to build the
-// Authorization header sent to server.ts's authMiddleware.
 export async function getAccessToken(): Promise<string | null> {
   if (!supabase) return null;
   const { data: { session } } = await supabase.auth.getSession();
