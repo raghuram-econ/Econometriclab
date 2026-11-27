@@ -1453,7 +1453,9 @@ class ARIMARequest(BaseModel):
     p: int = Field(ge=0, le=5)
     d: int = Field(ge=0, le=2)
     q: int = Field(ge=0, le=5)
-    horizon: int = Field(default=10, ge=1, le=100)
+    # Accept legacy oversized values, then clamp at the model call so clients
+    # get a bounded forecast instead of a request-validation failure.
+    horizon: int = Field(default=10, ge=1, le=100000)
 
 @app.post("/python/arima-full")
 def run_arima_full(req: ARIMARequest):
@@ -1495,7 +1497,8 @@ def run_arima_full(req: ARIMARequest):
             if cl is not None: coef_rows[-1]["confLow"] = cl
             if ch is not None: coef_rows[-1]["confHigh"] = ch
 
-        forecast_obj = res.get_forecast(steps=req.horizon)
+        forecast_horizon = min(req.horizon, 100)
+        forecast_obj = res.get_forecast(steps=forecast_horizon)
         forecast_mean = [safe_float(v) for v in forecast_obj.predicted_mean]
         forecast_ci_df = forecast_obj.conf_int(alpha=0.05)
         forecast_ci = [
