@@ -216,7 +216,7 @@ export function EmpiricalQuiz() {
         {/* Fallback Info */}
         <div className="p-8 border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 text-center">
            <p className="text-[11px] text-slate-400 font-serif italic">
-              AI Generation uses the Gemini-3-Flash model. Standard quizzes focus on Gauss-Markov, OVB, and Fixed Effects transformations.
+              AI-generated questions use the configured OpenRouter model. Standard quizzes focus on Gauss-Markov, OVB, and Fixed Effects transformations.
            </p>
         </div>
       </div>

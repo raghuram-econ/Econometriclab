@@ -127,15 +127,15 @@ export function PrivacyPolicy({ isOpen, onClose }: ModalProps) {
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5 font-serif text-[13px] text-slate-300 leading-relaxed custom-scrollbar">
           <p className="font-sans font-medium text-slate-400 text-xs">
-            The Economics Learning Lab (Beta) respects the privacy of your empirical inquiries, datasets, and tutoring submissions. We treat academic work with strict confidentiality.
+            The Economics Learning Lab (Beta) uses browser processing and hosted services. Data handling depends on the feature you choose.
           </p>
 
           <section className="space-y-2">
             <h3 className="font-sans font-bold text-emerald-400 flex items-center gap-1.5 uppercase text-[11px] tracking-wider">
-              1. Dataset Isolation & In-Memory Estimation
+              1. Dataset Processing
             </h3>
             <p>
-              Any econometric datasets (.csv or spreadsheet formats) loaded into the Academic Lab or Stats Sandbox are processed in-memory. They are never permanently archived, distributed, or used to train public machine learning algorithms. All calculations operate entirely inside your safe browser environment.
+              CSV and spreadsheet files are parsed in the browser, and some calculations run there. Python-backed analyses send selected observations and model settings through the app's Node service to its Python service on Render. SPSS .sav files are uploaded to Render for parsing. Signed-in accounts can save workspace metadata and model run records in Supabase. This notice does not specify retention periods for hosted services; review the relevant provider terms and do not send data you are not allowed to share.
             </p>
           </section>
 
@@ -144,7 +144,7 @@ export function PrivacyPolicy({ isOpen, onClose }: ModalProps) {
               2. Chat History & Academic Queries
             </h3>
             <p>
-              Academic inquiries processed via the "Professor Desk", "Academic Lab", or "Teacher Mode" are forwarded through secure API pipes to the designated Gemini-3-Flash model. This metadata remains protected and is utilized exclusively to formulate responses and update your offline study record.
+              AI questions and the context included by each feature are sent from the app to the configured OpenRouter service. The content varies by feature and may include conversation history or model results. Do not assume that all requests are anonymized or that the provider retains no data; review OpenRouter's current terms before sending sensitive material.
             </p>
           </section>
 
@@ -153,7 +153,7 @@ export function PrivacyPolicy({ isOpen, onClose }: ModalProps) {
               3. Cookie Usage and Client Storage
             </h3>
             <p>
-              Your scholar streak, study logs, and configuration preferences (like UI density and academic level) are safely persisted in standard browser localStorage. No tracking pixels, persistent advertisement profiles, or invasive third-party telemetry tools are configured inside this application.
+              Some preferences, session state, and AI chat messages are saved in this browser. The chat-history setting can remove saved chat copies and stop future local chat autosaves. Signed-in workspace metadata and model run records may also be stored in Supabase. Clearing browser storage does not remove records already saved to Supabase or information handled by OpenRouter.
             </p>
           </section>
         </div>

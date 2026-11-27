@@ -232,7 +232,7 @@ export default function AIDigest({
         {digest && (
           <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
             <span className="text-[10px] text-slate-400 uppercase tracking-wider font-mono">
-              Powered by gemini-3.5-flash
+              AI-assisted summary via OpenRouter
             </span>
             <button
               onClick={handleRecalculate}

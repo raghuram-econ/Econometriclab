@@ -148,6 +148,16 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
   const pythonBackendUrl = process.env.PYTHON_BACKEND_URL || "http://localhost:8000";
   const aiThrottler = new AIRequestThrottler();
+  const MAX_JSON_ANALYSIS_BODY_BYTES = 20 * 1024 * 1024;
+  const MAX_SAV_UPLOAD_BYTES = 20 * 1024 * 1024;
+  const internalSecret = () => process.env.INTERNAL_SECRET?.trim() || null;
+  const internalAuthUnavailable = { error: "Python service authentication is not configured." };
+  const rateLimitHandler = (service: string) => (req: any, res: any, _next: any, options: any) => {
+    const retryAfterSeconds = Math.ceil(options.windowMs / 1000);
+    res.setHeader("Retry-After", String(retryAfterSeconds));
+    console.warn(`[rate-limit] ${service} blocked ${req.method} ${req.originalUrl}`);
+    res.status(options.statusCode).json(options.message);
+  };
 
   // 1. Initial global headers-based Content-Length size check to prevent memory allocation DoS
   app.use((req, res, next) => {
@@ -179,6 +189,8 @@ async function startServer() {
       req.path === "/health" ||
       req.path === "/api/health" ||
       req.originalUrl === "/api/health" ||
+      req.path === "/api/health/dependencies" ||
+      req.originalUrl === "/api/health/dependencies" ||
       req.path === "/api/datasets/mroz" ||
       req.originalUrl === "/api/datasets/mroz"
     ) {
@@ -217,7 +229,37 @@ async function startServer() {
     windowMs: 60 * 1000,
     max: 60,
     keyGenerator: (req: any) => req.user?.sub || ipKeyGenerator(req.ip) || 'anonymous',
-    message: { error: "Too many estimation requests. Please wait a minute before trying again." },
+    message: { error: "Too many estimation requests. Please wait before trying again.", retryAfterSeconds: 60 },
+    handler: rateLimitHandler("estimation"),
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { ip: false },
+  });
+
+  // Give each Python method its own bucket so unrelated analyses and ordinary
+  // estimates do not consume the same allowance. Retry-After is returned by
+  // express-rate-limit together with the standard RateLimit headers.
+  const pythonAnalysisLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    keyGenerator: (req: any) => {
+      const principal = req.user?.sub || ipKeyGenerator(req.ip) || 'anonymous';
+      const route = (req.originalUrl || req.path).split('?')[0];
+      return `${principal}:${route}`;
+    },
+    message: { error: "This analysis was requested too often. Please wait before retrying.", retryAfterSeconds: 60 },
+    handler: rateLimitHandler("python-analysis"),
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { ip: false },
+  });
+
+  const savUploadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 5,
+    keyGenerator: (req: any) => req.user?.sub || ipKeyGenerator(req.ip) || 'anonymous',
+    message: { error: "Too many SPSS file uploads. Please wait before trying again.", retryAfterSeconds: 60 },
+    handler: rateLimitHandler("sav-upload"),
     standardHeaders: true,
     legacyHeaders: false,
     validate: { ip: false },
@@ -228,6 +270,7 @@ async function startServer() {
     max: 10,
     keyGenerator: (req: any) => req.user?.sub || ipKeyGenerator(req.ip) || 'anonymous',
     message: { error: "Too many AI consultation requests. Please wait a minute before trying again." },
+    handler: rateLimitHandler("ai"),
     standardHeaders: true,
     legacyHeaders: false,
     validate: { ip: false },
@@ -237,7 +280,8 @@ async function startServer() {
   app.use("/api/estimate", estimationLimiter);
   app.use("/api/gemini", geminiLimiter);
   app.use("/api/ai", geminiLimiter);
-  app.use(["/api/python/*", "/api/parse-sav"], estimationLimiter);
+  app.use("/api/python/*", pythonAnalysisLimiter);
+  app.use("/api/parse-sav", savUploadLimiter);
 
   // Apply request throttling to AI endpoints to sequence high-frequency concurrent usage and stay within API quotas
   app.use("/api/gemini", aiThrottler.middleware());
@@ -250,17 +294,26 @@ async function startServer() {
   // 3. Size and structures validation after body is parsed
   const estimationPayloadValidator = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const contentLength = req.headers['content-length'];
-    if (contentLength && parseInt(contentLength, 10) > 20 * 1024 * 1024) {
-      return res.status(400).json({ error: "Payload too large. Maximum allowed size is 20MB." });
+    if (contentLength && parseInt(contentLength, 10) > MAX_JSON_ANALYSIS_BODY_BYTES) {
+      return res.status(413).json({ error: "Payload too large. Maximum allowed size is 20 MiB." });
     }
     if (req.body && Array.isArray(req.body.data) && req.body.data.length > 100000) {
-      return res.status(400).json({ error: "Data size limit exceeded. Maximum allowed is 100,000 rows." });
+      return res.status(413).json({ error: "Data size limit exceeded. Maximum allowed is 100,000 rows." });
+    }
+    next();
+  };
+
+  const savUploadPayloadValidator = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const contentLength = req.headers['content-length'];
+    if (contentLength && parseInt(contentLength, 10) > MAX_SAV_UPLOAD_BYTES) {
+      return res.status(413).json({ error: "SPSS SAV files are limited to 20 MiB." });
     }
     next();
   };
 
   app.use("/api/estimate", estimationPayloadValidator);
-  app.use(["/api/python/*", "/api/parse-sav"], estimationPayloadValidator);
+  app.use("/api/python/*", estimationPayloadValidator);
+  app.use("/api/parse-sav", savUploadPayloadValidator);
 
   // ---- DeepSeek-backed AI client ----
   // Keeps the original Gemini SDK's call shape (`ai.models.generateContent({model,
@@ -460,6 +513,28 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  // Diagnostic endpoint for the separately deployed Python service. It is
+  // intentionally not Render's process healthCheckPath: a sleeping or
+  // temporarily unavailable Python service should not restart the Node app.
+  app.get("/api/health/dependencies", async (_req, res) => {
+    const token = internalSecret();
+    if (!token) {
+      return res.status(503).json({ status: "degraded", node: "ok", python: "not_configured" });
+    }
+    try {
+      const response = await fetch(`${pythonBackendUrl}/health`, {
+        headers: { "X-Internal-Token": token },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) {
+        return res.status(503).json({ status: "degraded", node: "ok", python: "unavailable" });
+      }
+      return res.json({ status: "ok", node: "ok", python: "ok" });
+    } catch {
+      return res.status(503).json({ status: "degraded", node: "ok", python: "unavailable" });
+    }
+  });
+
   app.get("/api/datasets/mroz", (req, res) => {
     try {
       const csvPath = path.join(process.cwd(), "mroz.csv");
@@ -514,17 +589,21 @@ async function startServer() {
   app.post(Object.keys(PYTHON_JSON_ROUTES), async (req, res) => {
     const target = PYTHON_JSON_ROUTES[req.path];
     if (!target) return res.status(404).json({ error: "Unknown Python route" });
+    const token = internalSecret();
+    if (!token) return res.status(503).json(internalAuthUnavailable);
     try {
       const upstream = await fetch(`${pythonBackendUrl}${target}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Internal-Token": process.env.INTERNAL_SECRET || 'ell_internal_token_secure_9832',
+          "X-Internal-Token": token,
         },
         body: JSON.stringify(req.body ?? {}),
       });
       const text = await upstream.text();
       res.status(upstream.status);
+      const retryAfter = upstream.headers.get("retry-after");
+      if (retryAfter) res.setHeader("Retry-After", retryAfter);
       try {
         res.json(JSON.parse(text));
       } catch {
@@ -541,7 +620,12 @@ async function startServer() {
     pathFilter: (pathname: string, req: any) => (req.originalUrl || pathname) === "/api/parse-sav",
     on: {
       proxyReq: (proxyReq: any, req: any, res: any) => {
-        proxyReq.setHeader('X-Internal-Token', process.env.INTERNAL_SECRET || 'ell_internal_token_secure_9832');
+        const token = internalSecret();
+        if (!token) {
+          proxyReq.destroy(new Error("Python service authentication is not configured."));
+          return;
+        }
+        proxyReq.setHeader('X-Internal-Token', token);
       },
       error: (err: any, req: any, res: any) => {
         if (!res.headersSent) {
@@ -551,6 +635,10 @@ async function startServer() {
     }
   } as any);
 
+  app.use("/api/parse-sav", (_req, res, next) => {
+    if (!internalSecret()) return res.status(503).json(internalAuthUnavailable);
+    next();
+  });
   app.use(pythonProxy);
 
   app.post("/api/estimate/ols", async (req, res) => {
@@ -1134,12 +1222,14 @@ matching standard panel software (such as Stata's \`xtreg, fe\` or R's \`plm\` w
   });
 
   app.post("/api/estimate/cox-ph", async (req, res) => {
+    const token = internalSecret();
+    if (!token) return res.status(503).json(internalAuthUnavailable);
     try {
       const response = await fetch(`${pythonBackendUrl}/api/run-cox-ph`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          "X-Internal-Token": process.env.INTERNAL_SECRET || 'ell_internal_token_secure_9832'
+          "X-Internal-Token": token
         },
         body: JSON.stringify(req.body)
       });
@@ -1156,12 +1246,14 @@ matching standard panel software (such as Stata's \`xtreg, fe\` or R's \`plm\` w
   });
 
   app.post("/api/estimate/quantile", async (req, res) => {
+    const token = internalSecret();
+    if (!token) return res.status(503).json(internalAuthUnavailable);
     try {
       const response = await fetch(`${pythonBackendUrl}/api/run-quantile`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          "X-Internal-Token": process.env.INTERNAL_SECRET || 'ell_internal_token_secure_9832'
+          "X-Internal-Token": token
         },
         body: JSON.stringify(req.body)
       });

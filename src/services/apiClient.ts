@@ -42,7 +42,12 @@ export async function callBackendAPI(endpoint: string, payload: object): Promise
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(errorData.error || errorData.detail || `API Error: ${response.status}`);
+      const message = errorData.error || errorData.detail || `API Error: ${response.status}`;
+      const retryAfterSeconds = Number(response.headers.get('Retry-After') || errorData.retryAfterSeconds);
+      if (response.status === 429 && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+        throw new Error(`${message} Try again in ${retryAfterSeconds} seconds.`);
+      }
+      throw new Error(message);
     }
 
     return await response.json();

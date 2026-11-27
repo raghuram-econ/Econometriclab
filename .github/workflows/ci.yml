@@ -18,6 +18,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+      - run: npm run build
+      - run: npm audit --omit=dev
         env:
           # OPENROUTER_API_KEY intentionally unset: the live-AI fidelity suite
           # self-skips without it (see src/lib/__tests__/interpreter-fidelity.test.ts)
@@ -30,5 +32,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - run: pip install --require-hashes -r backend/requirements.lock
+      - run: pip install -r backend/requirements-dev.txt
       - run: python -m pytest backend/tests/

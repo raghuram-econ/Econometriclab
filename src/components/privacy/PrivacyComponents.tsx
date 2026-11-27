@@ -1,14 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ShieldCheck, 
   X, 
   AlertTriangle, 
-  Cpu, 
   Database, 
-  EyeOff, 
   ExternalLink 
 } from 'lucide-react';
-import { useStore } from '../../store/useStore';
+import { clearSavedChatHistory, useStore } from '../../store/useStore';
 
 // ============================================================================
 // COMPONENT 1: DataUploadPrivacyBanner
@@ -31,28 +28,26 @@ export function DataUploadPrivacyBanner() {
   if (isDismissed) return null;
 
   return (
-    <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 shadow-sm relative flex items-start gap-3 transition-all duration-200 animate-in fade-in slide-in-from-top-4">
-      <div className="p-1.5 bg-emerald-100 rounded-xl text-emerald-700 shrink-0">
-        <ShieldCheck className="w-5 h-5" />
+    <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 shadow-sm relative flex items-start gap-3 transition-all duration-200 animate-in fade-in slide-in-from-top-4">
+      <div className="p-1.5 bg-blue-100 rounded-xl text-blue-700 shrink-0">
+        <Database className="w-5 h-5" />
       </div>
       <div className="space-y-2 flex-1 pr-6">
-        <h4 className="text-sm font-bold text-emerald-900 leading-none">
-          Your data never leaves this browser
+        <h4 className="text-sm font-bold text-blue-900 leading-none">
+          Data processing depends on the feature
         </h4>
-        <p className="text-xs text-emerald-800 leading-relaxed font-serif">
-          All computations run locally. Your CSV is not uploaded to any server. 
-          Only anonymised statistical results are sent to the AI service when you 
-          request an explanation.
+        <p className="text-xs text-blue-900 leading-relaxed font-serif">
+          Some calculations run in your browser. Python analyses and SPSS SAV parsing send data to this app's Render services. AI requests are sent through the app server to OpenRouter, and signed-in accounts can save workspace details and model results to Supabase.
         </p>
         <div className="flex flex-wrap gap-1.5 pt-1">
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800">
-            Local compute
+          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-800">
+            Browser + server compute
           </span>
           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-800">
-            No storage
+            Supabase saves
           </span>
           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-stone-200 text-stone-700">
-            GDPR friendly
+            AI via OpenRouter
           </span>
         </div>
       </div>
@@ -118,29 +113,26 @@ export function AIExplainConsentModal({ onConfirm, onCancel }: AIExplainConsentM
         {/* Content */}
         <div className="space-y-3">
           <p className="text-xs text-stone-600 leading-relaxed font-serif">
-            Only anonymised statistical outputs (coefficients, standard errors, p-values, R-squared) 
-            are transmitted to the AI service to formulate explanations. Your raw dataset rows remain 
-            entirely local on your device.
+            This request sends its model summary, question, and any context attached by this feature to the app server, which forwards the AI prompt to OpenRouter. The content can vary by feature, so do not assume every AI request contains only anonymised statistics. Other Python analyses and SPSS SAV parsing send data to the Render backend.
           </p>
 
           <div className="border border-stone-100 rounded-xl overflow-hidden text-xs">
             {/* Sent Box */}
             <div className="bg-emerald-50/50 p-3 border-b border-stone-100">
               <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-widest block mb-1">
-                ✔ Sent to AI
+                Example of model context
               </span>
               <code className="font-mono text-[11px] text-stone-700 block bg-white p-1.5 rounded border border-emerald-100 shadow-xs">
                 β = 0.432, SE = 0.091, p = 0.003, R² = 0.71
               </code>
             </div>
-            {/* Not Sent Box */}
-            <div className="bg-rose-50/50 p-3">
-              <span className="text-[10px] font-bold text-rose-800 uppercase tracking-widest block mb-1">
-                ✖ Not Sent to AI
+            <div className="bg-amber-50/70 p-3">
+              <span className="text-[10px] font-bold text-amber-900 uppercase tracking-widest block mb-1">
+                Before you continue
               </span>
-              <div className="font-mono text-[11px] text-stone-500 bg-white p-1.5 rounded border border-rose-100 line-through">
-                your raw CSV rows
-              </div>
+              <p className="text-[11px] text-amber-950">
+                Do not send confidential data unless your institution and data agreement allow it.
+              </p>
             </div>
           </div>
         </div>
@@ -157,7 +149,7 @@ export function AIExplainConsentModal({ onConfirm, onCancel }: AIExplainConsentM
             onClick={handleConfirm}
             className="px-5 py-2.5 bg-[#1B2E41] hover:bg-[#243D54] text-white rounded-xl text-xs font-bold uppercase tracking-widest shadow-sm hover:shadow transition-all"
           >
-            Send results only
+            Send request to AI
           </button>
         </div>
       </div>
@@ -171,7 +163,6 @@ export function AIExplainConsentModal({ onConfirm, onCancel }: AIExplainConsentM
 export function PrivacySettingsPanel() {
   const store = useStore();
   const [saveChat, setSaveChat] = useState(true);
-  const [anonymousAnalytics, setAnonymousAnalytics] = useState(false);
 
   useEffect(() => {
     try {
@@ -181,20 +172,16 @@ export function PrivacySettingsPanel() {
         if (parsed.saveChatHistory !== undefined) {
           setSaveChat(parsed.saveChatHistory);
         }
-        if (parsed.anonymousAnalytics !== undefined) {
-          setAnonymousAnalytics(parsed.anonymousAnalytics);
-        }
       }
     } catch (e) {
       console.error('Failed to parse privacy_settings:', e);
     }
   }, []);
 
-  const saveSettings = (newAi: boolean, newSaveChat: boolean, newAnalytics: boolean) => {
+  const saveSettings = (newAi: boolean, newSaveChat: boolean) => {
     const settings = {
       aiEnabled: newAi,
       saveChatHistory: newSaveChat,
-      anonymousAnalytics: newAnalytics,
     };
     localStorage.setItem('privacy_settings', JSON.stringify(settings));
   };
@@ -202,19 +189,14 @@ export function PrivacySettingsPanel() {
   const handleToggleAi = () => {
     const nextVal = !store.aiEnabled;
     store.setAIEnabled(nextVal);
-    saveSettings(nextVal, saveChat, anonymousAnalytics);
+    saveSettings(nextVal, saveChat);
   };
 
   const handleToggleSaveChat = () => {
     const nextVal = !saveChat;
     setSaveChat(nextVal);
-    saveSettings(store.aiEnabled, nextVal, anonymousAnalytics);
-  };
-
-  const handleToggleAnalytics = () => {
-    const nextVal = !anonymousAnalytics;
-    setAnonymousAnalytics(nextVal);
-    saveSettings(store.aiEnabled, saveChat, nextVal);
+    saveSettings(store.aiEnabled, nextVal);
+    if (!nextVal) clearSavedChatHistory();
   };
 
   return (
@@ -255,7 +237,7 @@ export function PrivacySettingsPanel() {
           <div className="space-y-1 pr-4">
             <label className="text-xs font-bold text-stone-800 block">Save chat history</label>
             <p className="text-[11px] text-stone-500 font-serif leading-relaxed">
-              Persist your conversations with the AI Professor in local storage on this device.
+              When enabled, AI chat messages are saved in this browser. Turning this off removes saved chat copies and prevents future local chat autosaves. It does not change data already sent to OpenRouter.
             </p>
           </div>
           <button
@@ -274,30 +256,6 @@ export function PrivacySettingsPanel() {
           </button>
         </div>
 
-        {/* Row 3: Anonymous Usage Analytics */}
-        <div className="flex items-center justify-between py-4 last:pb-0">
-          <div className="space-y-1 pr-4">
-            <label className="text-xs font-bold text-stone-800 block">Anonymous usage analytics</label>
-            <p className="text-[11px] text-stone-500 font-serif leading-relaxed">
-              Share strictly anonymous application telemetry to help improve our local math algorithms.
-            </p>
-          </div>
-          <button
-            onClick={handleToggleAnalytics}
-            className={`w-11 h-6 shrink-0 rounded-full transition-all duration-200 relative focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#1B2E41] ${
-              anonymousAnalytics ? 'bg-[#1B2E41]' : 'bg-stone-200'
-            }`}
-            role="switch"
-            aria-checked={anonymousAnalytics}
-          >
-            <span
-              className={`block w-4.5 h-4.5 rounded-full bg-white shadow-sm transform transition-transform duration-200 absolute top-[3px] ${
-                anonymousAnalytics ? 'translate-x-[22px]' : 'translate-x-[4px]'
-              }`}
-            />
-          </button>
-        </div>
-
       </div>
     </div>
   );
@@ -311,20 +269,20 @@ export function PrivacyTrustStrip() {
     <div className="bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-[10px] text-slate-400 space-y-2.5">
       <div className="flex items-center gap-2 text-[9px] font-mono font-bold text-slate-500 uppercase tracking-widest">
         <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-        ECON PRIVACY SECURED
+        DATA HANDLING
       </div>
       <div className="grid grid-cols-1 gap-1.5 font-sans">
         <div className="flex items-center gap-2">
           <span className="text-emerald-500/80 text-[11px]">🔒</span>
-          <span className="text-slate-300">Local-First Compute</span>
+          <span className="text-slate-300">Some methods run in browser</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-emerald-500/80 text-[11px]">🚫</span>
-          <span className="text-slate-300">Zero Server Storage</span>
+          <span className="text-slate-300">Python methods use Render</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-emerald-500/80 text-[11px]">👁️</span>
-          <span className="text-slate-300">Raw Data Stays Local</span>
+          <span className="text-slate-300">AI requests go to OpenRouter</span>
         </div>
       </div>
       <div className="border-t border-white/5 pt-2 flex justify-between items-center text-[9px]">
