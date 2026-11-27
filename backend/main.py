@@ -1,7 +1,8 @@
 import os
+import hmac
 from fastapi import FastAPI, HTTPException, Header, Security
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Any, Dict
 import pandas as pd
 import numpy as np
@@ -9,10 +10,12 @@ import statsmodels.api as sm
 import warnings
 warnings.filterwarnings('ignore')
 
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "ell_internal_token_secure_9832")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "").strip()
 
-async def verify_internal_token(x_internal_token: str = Header(None)):
-    if x_internal_token != INTERNAL_SECRET:
+async def verify_internal_token(x_internal_token: Optional[str] = Header(None)):
+    if not INTERNAL_SECRET:
+        raise HTTPException(status_code=503, detail="Internal authentication is not configured")
+    if not x_internal_token or not hmac.compare_digest(x_internal_token, INTERNAL_SECRET):
         raise HTTPException(status_code=401, detail="Unauthorized internal access")
 
 app = FastAPI(
@@ -603,10 +606,10 @@ import os
 
 @app.post("/api/parse-sav")
 async def parse_sav(file: UploadFile = File(...)):
-    # 1. Reject uploads over 100MB
-    MAX_SIZE = 100 * 1024 * 1024  # 100MB
+    # SAV uploads are proxied through the Node service, which enforces the same limit.
+    MAX_SIZE = 20 * 1024 * 1024  # 20 MiB
     if file.size and file.size > MAX_SIZE:
-        raise HTTPException(status_code=413, detail="File too large (max 100MB)")
+        raise HTTPException(status_code=413, detail="SPSS SAV files are limited to 20 MiB")
 
     tmp_path = None
     try:
@@ -624,7 +627,7 @@ async def parse_sav(file: UploadFile = File(...)):
                         os.unlink(tmp.name)
                     except:
                         pass
-                    raise HTTPException(status_code=413, detail="File too large (max 100MB)")
+                    raise HTTPException(status_code=413, detail="SPSS SAV files are limited to 20 MiB")
                 tmp.write(chunk)
             tmp_path = tmp.name
 
@@ -1446,17 +1449,21 @@ def run_staggered_did(req: StaggeredDIDRequest):
 
 
 class ARIMARequest(BaseModel):
-    series: List[float]
-    p: int
-    d: int
-    q: int
-    horizon: int = 10
+    series: List[float] = Field(min_length=10, max_length=100000)
+    p: int = Field(ge=0, le=5)
+    d: int = Field(ge=0, le=2)
+    q: int = Field(ge=0, le=5)
+    horizon: int = Field(default=10, ge=1, le=100)
 
 @app.post("/python/arima-full")
 def run_arima_full(req: ARIMARequest):
     try:
         from statsmodels.tsa.arima.model import ARIMA
         import pandas as pd
+        if not np.all(np.isfinite(req.series)):
+            raise HTTPException(status_code=422, detail="The series must contain only finite numeric values.")
+        if req.p + req.q > 8:
+            raise HTTPException(status_code=422, detail="The combined AR and MA order must not exceed 8.")
         series = pd.Series(req.series, dtype=float)
         # Refuse specifications the data cannot support. Without this, e.g.
         # ARIMA(5,0,5) on two observations returns a "fitted" model with
@@ -1488,8 +1495,7 @@ def run_arima_full(req: ARIMARequest):
             if cl is not None: coef_rows[-1]["confLow"] = cl
             if ch is not None: coef_rows[-1]["confHigh"] = ch
 
-        horizon = max(1, min(req.horizon, 100))
-        forecast_obj = res.get_forecast(steps=horizon)
+        forecast_obj = res.get_forecast(steps=req.horizon)
         forecast_mean = [safe_float(v) for v in forecast_obj.predicted_mean]
         forecast_ci_df = forecast_obj.conf_int(alpha=0.05)
         forecast_ci = [

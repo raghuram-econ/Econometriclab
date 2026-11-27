@@ -55,16 +55,16 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
         <div className="max-w-3xl mx-auto relative z-10 text-center space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-full text-emerald-300 text-[10px] font-bold uppercase tracking-widest">
             <ShieldCheck className="w-3.5 h-3.5" />
-            Local-First Data Safeguard Verified
+            Feature-Based Data Handling
           </div>
           <h1 className="text-3xl md:text-4xl font-serif font-bold tracking-tight">
             Privacy Policy &amp; Data Safeguards
           </h1>
           <p className="text-sm md:text-base text-slate-300 font-serif max-w-xl mx-auto italic">
-            "Absolute confidentiality is the baseline of scientific econometrics."
+            "Check where data goes before using a cloud-backed feature."
           </p>
           <div className="pt-2 text-[11px] font-mono text-slate-400">
-            Last Updated: June 2026 • Version {APP_VERSION} (Beta)
+            Last Updated: 27 November 2026 • Version {APP_VERSION} (Beta)
           </div>
         </div>
       </div>
@@ -77,9 +77,9 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
             <div className="p-2 bg-blue-50 text-blue-700 rounded-xl w-fit">
               <Cpu className="w-5 h-5" />
             </div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">Local-First Compute</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">Browser and Render Processing</h3>
             <p className="text-xs text-slate-600 font-serif leading-relaxed">
-              OLS regressions, Fixed Effects, ARIMA, and tests run fully on your browser. Your dataset rows are never uploaded to any server.
+              Some work runs in your browser. Python analyses and SPSS SAV parsing send the required data to this app's Render services.
             </p>
           </div>
 
@@ -87,9 +87,9 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
             <div className="p-2 bg-emerald-50 text-emerald-700 rounded-xl w-fit">
               <Database className="w-5 h-5" />
             </div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">No Raw Storage</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">Supabase Account Storage</h3>
             <p className="text-xs text-slate-600 font-serif leading-relaxed">
-              Your research data remains in ephemeral browser memory. Clearing your browser cache fully resets your workspace.
+              Signed-in accounts can save workspace details and model run records in Supabase. Workspace dataset rows are omitted, but model run records are saved as provided by the app.
             </p>
           </div>
 
@@ -97,9 +97,9 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
             <div className="p-2 bg-indigo-50 text-indigo-700 rounded-xl w-fit">
               <EyeOff className="w-5 h-5" />
             </div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">Anonymized AI</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">AI via OpenRouter</h3>
             <p className="text-xs text-slate-600 font-serif leading-relaxed">
-              Only model statistics (coefficients, fit statistics) are shared with the Gemini API to render text explanations.
+              AI prompts and feature context are sent through the app server to OpenRouter. Their contents vary by feature.
             </p>
           </div>
         </section>
@@ -111,19 +111,20 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
           <section className="space-y-3 border-b border-slate-200 pb-8">
             <h2 className="text-lg font-serif font-bold text-slate-900 flex items-center gap-2">
               <span className="text-sm font-mono text-blue-600">01.</span>
-              The "Local-First" Econometrics Philosophy
+              How analysis data is processed
             </h2>
             <div className="text-xs text-slate-600 space-y-4 leading-relaxed font-serif">
               <p>
-                In standard economic analysis, data security, intellectual property, and compliance with data usage agreements (such as proprietary micro-datasets from central banks or commercial financial sources) are critical constraints. Traditional "cloud-heavy" SaaS architectures compromise this security by forcing researchers to upload raw datasets to third-party databases.
+                Data handling depends on the analysis you choose. Check your data-use agreement and institutional rules before sending research data to a hosted service.
               </p>
               <p>
-                <strong>Economics Learning Lab (Beta)</strong> operates on a decentralized, client-side execution model. Whether you upload a <code>.csv</code> file, an Excel sheet, or use one of our integrated UGC-NET standard datasets, the core execution flow remains local:
+                <strong>Economics Learning Lab (Beta)</strong> uses both browser and hosted processing:
               </p>
               <ul className="list-disc pl-5 space-y-2 mt-2 font-sans text-xs">
-                <li><strong className="text-slate-800">CSV Parsing:</strong> Executed fully on-device via custom client-side parsing routines.</li>
-                <li><strong className="text-slate-800">OLS &amp; Matrix Math:</strong> Run natively in the browser's JavaScript V8 engine. No raw data rows are transmitted over the network for processing.</li>
-                <li><strong className="text-slate-800">Visualization:</strong> Chart components utilize native D3-based SVG generators directly inside the virtual DOM.</li>
+                <li><strong className="text-slate-800">Browser processing:</strong> CSV and spreadsheet files are parsed in the browser; some calculations also run there.</li>
+                <li><strong className="text-slate-800">Python analyses:</strong> Selected observations and model settings are sent through the Node service to the Python service on Render.</li>
+                <li><strong className="text-slate-800">SPSS files:</strong> A <code>.sav</code> file is uploaded to the Render backend for parsing.</li>
+                <li><strong className="text-slate-800">Saved account data:</strong> Signed-in workspace metadata and model run records can be stored in Supabase.</li>
               </ul>
             </div>
           </section>
@@ -132,19 +133,19 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
           <section className="space-y-3 border-b border-slate-200 pb-8">
             <h2 className="text-lg font-serif font-bold text-slate-900 flex items-center gap-2">
               <span className="text-sm font-mono text-blue-600">02.</span>
-              AI Integrations and Confidentiality Safeguards
+              AI services and submitted content
             </h2>
             <div className="text-xs text-slate-600 space-y-4 leading-relaxed font-serif">
               <p>
-                The <strong>Professor Desk</strong>, <strong>Academic Lab</strong>, and model interpretation features are powered by secure Google Gemini 1.5/3.5 models. To respect academic data restrictions, we have implemented an absolute <strong>Confidentiality Filter</strong>:
+                AI features are routed by the app server to <strong>OpenRouter</strong>. The prompt may include your question, conversation history, model results, or other feature context. The exact content depends on the feature you use.
               </p>
               <div className="bg-amber-50/50 border border-amber-200/60 p-4 rounded-xl space-y-2 font-sans">
                 <div className="flex items-center gap-2 text-xs font-bold text-amber-800">
                   <Lock className="w-4 h-4 text-amber-700" />
-                  CONFIDENTIALITY PROTOCOL
+                  BEFORE SENDING AN AI REQUEST
                 </div>
                 <p className="text-[11px] text-amber-900 font-serif leading-relaxed">
-                  Before any request is sent to the Gemini API, the platform filters out all primary raw data matrices. The LLM only receives consolidated, aggregated, and non-reconstructible statistical summaries (e.g., intercept coefficients, R-squared values, standard errors). Your individual data points and categorical survey responses remain completely private.
+                  Do not assume that every AI request is anonymous or contains only summary statistics. Do not submit confidential or identifiable data unless your institution and data agreement permit sending it to the app server and OpenRouter. Review OpenRouter's current privacy and retention terms for information about provider handling.
                 </p>
               </div>
             </div>
@@ -158,28 +159,21 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
             </h2>
             <div className="text-xs text-slate-600 space-y-4 leading-relaxed font-serif">
               <p>
-                Under our Commitment to Transparent Research, students have direct access to their privacy settings at any time (accessible via the <strong>Scholar Dashboard</strong> and <strong>Academic Lab / Subscriptions</strong> panel):
+                The AI setting controls AI features in the app. The chat-history setting controls browser autosaves only. Neither setting changes data already sent to hosted services or their retention:
               </p>
               <div className="space-y-2.5 font-sans text-xs">
                 <div className="flex items-start gap-2.5">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                   <div>
                     <strong className="text-slate-800 block font-medium">Opt-in AI Explanations</strong>
-                    <span className="text-slate-500">Toggle whether OLS statistics are sent to the AI Professor.</span>
+                    <span className="text-slate-500">Turn AI features on or off in the app. Turning them off does not withdraw requests already sent.</span>
                   </div>
                 </div>
                 <div className="flex items-start gap-2.5">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                   <div>
                     <strong className="text-slate-800 block font-medium">Chat History Persistence</strong>
-                    <span className="text-slate-500">Decide whether your queries are stored locally in the browser memory or discarded immediately.</span>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="text-slate-800 block font-medium">Telemetry-Free Mode</strong>
-                    <span className="text-slate-500">Choose whether you share anonymous app usage metrics to help optimize local math utilities.</span>
+                    <span className="text-slate-500">When enabled, AI chat messages are saved in this browser. Turning it off removes saved browser copies and stops future local chat autosaves; it does not affect provider retention.</span>
                   </div>
                 </div>
               </div>
@@ -193,7 +187,7 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
               Compliance and Institutional Inquiries
             </h2>
             <p className="text-xs text-slate-600 leading-relaxed font-serif">
-              Our decentralized design is fully compliant with modern data safety regulations, including GDPR (General Data Protection Regulation) and CCPA, as we do not run a centralized database that retains user research datasets. If you are an academic researcher or institution requiring a tailored local-only deployment on internal air-gapped servers, please contact our Institutional Relations desk.
+              This page describes the data flows visible in this application; it does not certify GDPR, CCPA, or institutional compliance. Researchers should confirm their institution's requirements and data-use agreements before using hosted processing. A local-only deployment requires separate configuration and review.
             </p>
           </section>
 
@@ -204,7 +198,7 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
           <div className="space-y-1.5 max-w-md">
             <div className="flex items-center gap-2 text-xs font-mono font-bold text-blue-400">
               <Sparkles className="w-3.5 h-3.5 text-blue-300" />
-              ACADEMIC COMPLIANCE SECURED
+              REVIEW DATA FLOW BEFORE ANALYSIS
             </div>
             <h4 className="text-sm font-bold uppercase tracking-tight font-sans">Ready to return to your estimations?</h4>
             <p className="text-xs text-slate-400 font-serif leading-relaxed">

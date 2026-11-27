@@ -543,7 +543,7 @@ export default function Layout({ children, activeTab, onTabChange, aiPanel, onCl
               
               <div className="p-6 border-t border-border-subtle bg-slate-50/50">
                 <p className="text-[9px] text-slate-400 leading-normal italic">
-                  Note: AI interpretations are generated using Gemini. Always verify results against theoretical literature and Gauss-Markov assumptions.
+                  Note: AI interpretations use the configured OpenRouter model. Always verify results against theory and model assumptions.
                 </p>
               </div>
             </aside>

@@ -44,7 +44,31 @@ const loadAutosave = () => {
   return {};
 };
 
+const isChatHistorySavingEnabled = () => {
+  try {
+    const settings = JSON.parse(localStorage.getItem('privacy_settings') || '{}');
+    return settings.saveChatHistory !== false;
+  } catch {
+    return true;
+  }
+};
+
+export const clearSavedChatHistory = () => {
+  try {
+    const saved = loadAutosave();
+    delete saved.professorDeskMessages;
+    delete saved.labPartnerMessages;
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(saved));
+  } catch (e) {
+    console.error('Failed to clear saved chat history:', e);
+  }
+};
+
 const saveAutosaveField = (field: string, value: any) => {
+  if ((field === 'professorDeskMessages' || field === 'labPartnerMessages') && !isChatHistorySavingEnabled()) {
+    clearSavedChatHistory();
+    return;
+  }
   try {
     const saved = loadAutosave();
     saved[field] = value;
@@ -138,6 +162,11 @@ const initialAiEnabled = (() => {
 })();
 
 const savedState = loadAutosave();
+if (!isChatHistorySavingEnabled()) {
+  delete savedState.professorDeskMessages;
+  delete savedState.labPartnerMessages;
+  clearSavedChatHistory();
+}
 
 const initialAppMode = (() => {
   try {

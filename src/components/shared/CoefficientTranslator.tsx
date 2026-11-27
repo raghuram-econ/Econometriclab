@@ -11,6 +11,15 @@ interface Translation {
   causality: 'associational' | 'causal' | 'tentative';
 }
 
+function renderPlainLanguage(text: string) {
+  return text.split(/(\*\*.*?\*\*)/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index} className="text-blue-600">{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
 interface CoefficientTranslatorProps {
   coefficients: any[];
   yVar: string;
@@ -105,7 +114,7 @@ export function CoefficientTranslator({ coefficients, yVar, xVars, modelType, is
                         <HelpCircle className="w-3 h-3" /> Plain Language
                      </p>
                      <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm">
-                        <p className="text-sm leading-relaxed text-slate-700 font-serif" dangerouslySetInnerHTML={{ __html: t.plain.replace(/\*\*(.*?)\*\*/g, '<strong class="text-blue-600">$1</strong>') }} />
+                        <p className="text-sm leading-relaxed text-slate-700 font-serif">{renderPlainLanguage(t.plain)}</p>
                      </div>
                   </div>
                   <div className="space-y-2 opacity-60 grayscale hover:opacity-100 hover:grayscale-0 transition-all">

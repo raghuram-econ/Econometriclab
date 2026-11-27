@@ -16,8 +16,8 @@ services:
     plan: free
     branch: main
     autoDeploy: true
-    buildCommand: npm install && node --max-old-space-size=2048 ./node_modules/vite/bin/vite.js build
-    startCommand: node ./node_modules/tsx/dist/cli.mjs server.ts
+    buildCommand: npm ci --include=dev && npm run build && npm prune --omit=dev
+    startCommand: node dist/server.cjs
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
@@ -39,7 +39,7 @@ services:
     plan: free
     branch: main
     autoDeploy: true
-    buildCommand: pip install -r backend/requirements.txt
+    buildCommand: pip install --require-hashes -r backend/requirements.lock
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION

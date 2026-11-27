@@ -275,7 +275,7 @@ export default function TeacherMode() {
                   <AlertCircle className="h-5 w-5 shrink-0 text-red-500 mt-0.5" />
                   <div>
                     <span className="font-bold block mb-0.5">Evaluation Error:</span>
-                    {error} Verify GEMINI_API_KEY environment credentials and retry.
+                    {error} Check the OPENROUTER_API_KEY setting in Render and retry.
                   </div>
                 </div>
               )}

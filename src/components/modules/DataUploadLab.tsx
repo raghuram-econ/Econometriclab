@@ -21,6 +21,8 @@ import { useDuckDB } from '../../hooks/useDuckDB';
 import DataPreview from '../shared/DataPreview';
 import { inferVariableType } from '../../lib/variableTypeDetection';
 
+const MAX_SAV_UPLOAD_BYTES = 20 * 1024 * 1024;
+
 interface DataUploadLabProps {
   onDataLoaded?: (payload: { rows: any[] }, filename: string) => void;
 }
@@ -136,6 +138,12 @@ export default function DataUploadLab({ onDataLoaded }: DataUploadLabProps) {
 
     if (!isCSV && !isTSV && !isParquet && !isExcel && !isSav) {
       setError("Unsupported file format. Please upload a .csv, .tsv, .parquet, .xlsx, .xls, or .sav file.");
+      setLoading(false);
+      return;
+    }
+
+    if (isSav && file.size > MAX_SAV_UPLOAD_BYTES) {
+      setError('SPSS .sav files are limited to 20 MiB because they are parsed by the server.');
       setLoading(false);
       return;
     }
@@ -485,14 +493,14 @@ export default function DataUploadLab({ onDataLoaded }: DataUploadLabProps) {
                   Drop your CSV/Excel/SPSS SAV workspace file here, or <span className="text-blue-600 underline hover:text-blue-800">browse folders</span>
                 </p>
                 <p className="text-xs text-slate-500 font-serif italic max-w-md mx-auto">
-                  Processes and validates CSV (.csv), Excel (.xlsx, .xls), or SPSS (.sav) files for immediate econometric and research analysis.
+                  CSV, TSV, Parquet, and Excel files are parsed in this browser. SPSS SAV files are sent to the Render backend for parsing and must be 20 MiB or smaller.
                 </p>
               </div>
             </div>
           )}
         </div>
 
-        {activeFile && activeFile.size > 100 * 1024 * 1024 && (
+        {activeFile && /\.(csv|tsv|parquet)$/i.test(activeFile.name) && activeFile.size > 100 * 1024 * 1024 && (
           <div id="large-file-size-warning" className="mt-4 flex items-start gap-3 p-4 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-900 animate-in fade-in duration-200">
             <AlertCircle className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" />
             <div>
