@@ -343,7 +343,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           <div className="flex items-start gap-2 mb-8">
             <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
             <p className="text-slate-400 text-xs leading-relaxed">
-              Saved datasets stay in this browser. Running a model sends the required data to our compute server; AI requests send your prompt and supporting analysis context to our server and OpenRouter. Workspace details and model history may sync to Supabase while a session is active. Avoid sensitive or confidential data.
+              Some analyses run in your browser. Python analyses and SPSS .sav files are sent to our Render services. AI requests may send your prompt and feature context through our server to OpenRouter. Signed-in workspace details and model run records may be saved in Supabase. Avoid sensitive data.
             </p>
           </div>
 
