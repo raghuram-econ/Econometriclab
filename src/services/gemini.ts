@@ -721,6 +721,13 @@ export interface AnovaRow {
   p: string | null;
 }
 
+export interface AnovaGroupSummary {
+  group: string;
+  n: number;
+  mean: string;
+  standardDeviation: string | null;
+}
+
 export interface TTestResults {
   mean_x: string | null;
   mean_y: string | null;
@@ -753,6 +760,7 @@ export interface StatsInterpretationResult {
   assumptions: AssumptionResult[];
   apaParagraph: string;
   anovaRows?: AnovaRow[];
+  anovaGroups?: AnovaGroupSummary[];
   ttestResults?: TTestResults;
   factorAnalysis?: FactorAnalysisResults;
   warnings?: string[];

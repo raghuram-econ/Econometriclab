@@ -25,6 +25,7 @@ import {
 import { useStore } from '../../store/useStore';
 import { interpretStatsOutput, StatsInterpretationResult } from '../../services/gemini';
 import { estimateModel, EstimationParams } from '../../lib/econometrics/estimators';
+import { calculateOneWayAnova } from '../../lib/econometrics/anova';
 import { cn, copyTextToClipboard, safeDownloadFile } from '../../lib/utils';
 import { exportToLaTeX } from '../../lib/latexExporter';
 import jsPDF from 'jspdf';
@@ -347,6 +348,7 @@ function StatsInterpreterLabComponent() {
   // Interactive variables selector
   const [depVar, setDepVar] = useState<string>('');
   const [indepVars, setIndepVars] = useState<string[]>([]);
+  const [groupVar, setGroupVar] = useState<string>('');
   // Additional controls
   const [entityVar, setEntityVar] = useState<string>('');
   const [timeVar, setTimeVar] = useState<string>('');
@@ -433,8 +435,14 @@ function StatsInterpreterLabComponent() {
       if (firstVar) setDepVar(firstVar.name);
       if ((currentDataset.variables?.length ?? 0) > 1) {
         const secondVar = currentDataset.variables[1];
-        if (secondVar) setIndepVars([secondVar.name]);
+        if (secondVar) {
+          setIndepVars([secondVar.name]);
+          setGroupVar(secondVar.name);
+        }
+      } else {
+        setGroupVar('');
       }
+      setEstimatedN(null);
     } else {
       setWorkbenchMode('paste');
       setIsSimulated(true);
@@ -518,6 +526,69 @@ function StatsInterpreterLabComponent() {
     setLoading(true);
 
     try {
+      if (analysisType === 'ANOVA') {
+        const model = calculateOneWayAnova(currentDataset.data, depVar, groupVar);
+        const format = (value: number) => Number.isFinite(value) ? value.toFixed(4) : '∞';
+        const pText = model.pValue < 0.001 ? '< 0.001' : model.pValue.toFixed(4);
+        const anovaRows = [
+          { source: 'Between groups', SS: format(model.ssBetween), df: String(model.dfBetween), MS: format(model.msBetween), F: format(model.fStatistic), p: pText },
+          { source: 'Within groups (error)', SS: format(model.ssWithin), df: String(model.dfWithin), MS: format(model.msWithin), F: null, p: null },
+          { source: 'Total', SS: format(model.ssTotal), df: String(model.dfTotal), MS: null, F: null, p: null }
+        ];
+        const groupSummaryText = model.groups
+          .map(group => `  ${group.group}: n=${group.n}, mean=${group.mean.toFixed(4)}, SD=${group.standardDeviation == null ? 'not available (n=1)' : group.standardDeviation.toFixed(4)}`)
+          .join('\n');
+        const rawText = [
+          'ONE-WAY ANOVA (calculated locally from the active dataset)',
+          `Outcome: ${model.outcome}`,
+          `Grouping factor: ${model.factor}`,
+          `Complete observations: ${model.n}; excluded for missing/invalid outcome or group: ${model.excludedRows}`,
+          '',
+          'Group summaries:',
+          groupSummaryText,
+          '',
+          'ANOVA table:',
+          'Source | SS | df | MS | F | p-value',
+          `Between groups | ${format(model.ssBetween)} | ${model.dfBetween} | ${format(model.msBetween)} | ${format(model.fStatistic)} | ${pText}`,
+          `Within groups (error) | ${format(model.ssWithin)} | ${model.dfWithin} | ${format(model.msWithin)} | — | —`,
+          `Total | ${format(model.ssTotal)} | ${model.dfTotal} | — | — | —`,
+          '',
+          `Effect size: eta-squared = ${model.etaSquared.toFixed(4)}`,
+          'Assumption note: independence, within-group normality, and equal variances were not tested. A significant omnibus result does not identify which pairs differ; use an appropriate post-hoc procedure.'
+        ].join('\n');
+        const apaParagraph = `A one-way ANOVA compared ${model.outcome} across ${model.groups.length} groups of ${model.factor}, using ${model.n} complete observations. The result was F(${model.dfBetween}, ${model.dfWithin}) = ${format(model.fStatistic)}, p ${pText}, eta-squared = ${model.etaSquared.toFixed(4)}. ${model.pValue < 0.05 ? 'The omnibus test indicates evidence that at least one group mean differs; it does not identify which groups differ.' : 'The omnibus test did not provide evidence of a difference in group means at the 0.05 level.'} Independence, within-group normality, and equal variances were not assessed; interpret the result with these limitations in mind.`;
+
+        setRawOutput(rawText);
+        setResult({
+          anovaRows,
+          anovaGroups: model.groups.map(group => ({
+            group: group.group,
+            n: group.n,
+            mean: group.mean.toFixed(4),
+            standardDeviation: group.standardDeviation == null ? null : group.standardDeviation.toFixed(4)
+          })),
+          assumptions: [{
+            testName: 'Independence, within-group normality, and equal variances',
+            statistic: 'Not tested by this calculation',
+            pValue: 'N/A',
+            verdict: 'Review'
+          }],
+          apaParagraph
+        });
+        setEstimatedN(model.n);
+        setShowCitation(false);
+        setIsSimulated(false);
+        addToHistory({
+          id: Math.random().toString(36).substring(7),
+          timestamp: new Date().toISOString(),
+          module: 'STAT-TESTS',
+          specification: `${depVar} by ${groupVar} (one-way ANOVA)`,
+          results: { ...model, anovaRows },
+          interpretation: apaParagraph
+        });
+        return;
+      }
+
       const allowedLiveTypes = ['OLS', 'Robust OLS', 'WLS', 'Logit', 'Probit', 'Panel FE', 'Panel RE', 'IV', 'DiD', 'Poisson'];
       if (!allowedLiveTypes.includes(analysisType)) {
         throw new Error(`The live local engine does not support '${analysisType}' directly yet. Please use the 'Paste Raw Software Output' tab to parse and interpret results from R, SPSS, Stata, or Python.`);
@@ -673,7 +744,10 @@ function StatsInterpreterLabComponent() {
         rawOutput,
         researchContext || `Empirical analysis using ${analysisType} estimator.`
       );
-      setResult(data);
+      // AI explains ANOVA output but must not replace locally calculated values.
+      setResult(analysisType === 'ANOVA' && result?.anovaRows
+        ? { ...data, anovaRows: result.anovaRows, anovaGroups: result.anovaGroups, assumptions: result.assumptions }
+        : data);
       setShowCitation(false);
       setIsSimulated(false);
       addToast('success', 'Interpretation Generated', `Statistical analysis successfully interpreted using ${toolType}.`);
@@ -1039,7 +1113,7 @@ function StatsInterpreterLabComponent() {
                       <option value="Panel RE">Panel RE (GLS Error-Components model)</option>
                       <option value="IV">IV/2SLS (Two-Stage Least Squares)</option>
                       <option value="DiD">Difference-in-Differences (DiD)</option>
-                      <option value="ANOVA">ANOVA (Analysis of Variance)</option>
+                      <option value="ANOVA">One-way ANOVA (single grouping factor)</option>
                       <option value="t-test">t-test (Mean Comparison)</option>
                       <option value="Chi-square">Chi-square Test</option>
                       <option value="Factor Analysis">Factor Analysis / PCA</option>
@@ -1058,7 +1132,13 @@ function StatsInterpreterLabComponent() {
                     </label>
                     <select
                       value={depVar}
-                      onChange={(e) => setDepVar(e.target.value)}
+                      onChange={(e) => {
+                        const nextDepVar = e.target.value;
+                        setDepVar(nextDepVar);
+                        if (nextDepVar === groupVar) {
+                          setGroupVar((currentDataset?.variables ?? []).find(v => v.name !== nextDepVar)?.name ?? '');
+                        }
+                      }}
                       className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white font-medium font-mono text-blue-600"
                     >
                       {(currentDataset?.variables ?? []).map(v => (
@@ -1067,8 +1147,27 @@ function StatsInterpreterLabComponent() {
                     </select>
                   </div>
 
+                  {analysisType === 'ANOVA' && (
+                    <div className="space-y-1.5 p-3 bg-violet-50 border border-violet-100 rounded-lg">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-violet-700 font-mono block">
+                        Grouping Factor (categorical):
+                      </label>
+                      <select
+                        value={groupVar}
+                        onChange={(e) => setGroupVar(e.target.value)}
+                        className="w-full text-xs border border-violet-200 rounded-lg p-2.5 bg-white font-mono"
+                      >
+                        <option value="">-- Choose grouping variable --</option>
+                        {(currentDataset?.variables ?? []).filter(v => v.name !== depVar).map(v => (
+                          <option key={v.name} value={v.name}>{v.name}</option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-violet-700">Choose a numeric outcome and a grouping column with at least two groups. The current one-way ANOVA does not test model assumptions.</p>
+                    </div>
+                  )}
+
                   {/* Regressors (independent variables) */}
-                  <div className="space-y-1.5">
+                  {analysisType !== 'ANOVA' && <div className="space-y-1.5">
                     <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 font-mono block">
                       Independent Regressors (X):
                     </label>
@@ -1091,7 +1190,7 @@ function StatsInterpreterLabComponent() {
                         </label>
                       ))}
                     </div>
-                  </div>
+                  </div>}
 
                   {/* Estimator-specific panel helpers */}
                   {(analysisType === 'Panel FE' || analysisType === 'Panel RE') && (
@@ -1294,6 +1393,7 @@ function StatsInterpreterLabComponent() {
                     // regression coefficients (Chi-square, ANOVA, etc.) have an unrelated df
                     // (e.g. Chi-square's own df), so applying this formula there silently
                     // produces a wrong N instead of an honest "Not reported".
+                    if (estimatedN !== null) return estimatedN.toString();
                     return (Number.isFinite(df) && coeffCount > 0) ? (df + coeffCount).toString() : 'Not reported';
                   })()} • {toolType} ENGINE
                 </div>
@@ -1316,7 +1416,9 @@ function StatsInterpreterLabComponent() {
                 ) : workbenchMode === 'live' ? (
                   <>
                     <Check className="w-3.5 h-3.5" />
-                    Computed live by the verified statistical engine
+                    {analysisType === 'ANOVA'
+                      ? 'Calculated locally from selected dataset; assumptions not tested'
+                      : 'Computed live by the verified statistical engine'}
                   </>
                 ) : (
                   <>
@@ -1339,6 +1441,7 @@ function StatsInterpreterLabComponent() {
                 </h4>
                 <div className="overflow-x-auto">
                   {analysisType === 'ANOVA' ? (
+                    <div className="space-y-5">
                     <table className="w-full font-mono text-[11px] border-t-2 border-b-2 border-slate-900 text-left">
                       <thead>
                         <tr className="border-b border-slate-300 bg-slate-100">
@@ -1363,6 +1466,23 @@ function StatsInterpreterLabComponent() {
                         ))}
                       </tbody>
                     </table>
+                    <div>
+                      <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-2">Group summaries</h5>
+                      <table className="w-full font-mono text-[11px] border-t border-b border-slate-300 text-left">
+                        <thead><tr className="border-b border-slate-200 bg-slate-100">
+                          <th className="py-2 px-3">Group</th><th className="py-2 px-3 text-right">N</th>
+                          <th className="py-2 px-3 text-right">Mean</th><th className="py-2 px-3 text-right">SD</th>
+                        </tr></thead>
+                        <tbody>{(result?.anovaGroups ?? []).map((group, idx) => (
+                          <tr key={`${group.group}-${idx}`} className="border-b border-slate-100">
+                            <td className="py-2 px-3">{group.group}</td><td className="py-2 px-3 text-right">{group.n}</td>
+                            <td className="py-2 px-3 text-right">{renderStatValue(group.mean)}</td>
+                            <td className="py-2 px-3 text-right">{renderStatValue(group.standardDeviation)}</td>
+                          </tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+                    </div>
                   ) : analysisType === 't-test' ? (
                     <div className="bg-[#f2f4f8] border border-slate-200 rounded p-4 font-mono text-[11px] space-y-2">
                       <div className="font-bold text-[#1a2744] uppercase tracking-wider text-[10px] mb-1">t-Test Statistical Summary</div>
