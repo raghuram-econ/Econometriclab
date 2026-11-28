@@ -767,6 +767,12 @@ export interface ChiSquareResults {
   effectSizeName: string;
   effectSize: string;
   minimumExpectedCount: string;
+  contingencyTable?: {
+    rowVariable: string;
+    columnVariable: string;
+    columnCategories: string[];
+    rows: { category: string; observed: number[] }[];
+  };
 }
 
 export interface StatsInterpretationResult {

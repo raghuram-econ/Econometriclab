@@ -26,6 +26,7 @@ import { useStore } from '../../store/useStore';
 import { interpretStatsOutput, StatsInterpretationResult } from '../../services/gemini';
 import { estimateModel, EstimationParams } from '../../lib/econometrics/estimators';
 import { calculateOneWayAnova } from '../../lib/econometrics/anova';
+import { calculateChiSquareIndependence } from '../../lib/econometrics/chiSquare';
 import { cn, copyTextToClipboard, safeDownloadFile } from '../../lib/utils';
 import { exportToLaTeX } from '../../lib/latexExporter';
 import jsPDF from 'jspdf';
@@ -349,6 +350,8 @@ function StatsInterpreterLabComponent() {
   const [depVar, setDepVar] = useState<string>('');
   const [indepVars, setIndepVars] = useState<string[]>([]);
   const [groupVar, setGroupVar] = useState<string>('');
+  const [chiSquareRowVar, setChiSquareRowVar] = useState<string>('');
+  const [chiSquareColumnVar, setChiSquareColumnVar] = useState<string>('');
   // Additional controls
   const [entityVar, setEntityVar] = useState<string>('');
   const [timeVar, setTimeVar] = useState<string>('');
@@ -438,9 +441,13 @@ function StatsInterpreterLabComponent() {
         if (secondVar) {
           setIndepVars([secondVar.name]);
           setGroupVar(secondVar.name);
+          setChiSquareColumnVar(secondVar.name);
         }
+        if (firstVar) setChiSquareRowVar(firstVar.name);
       } else {
         setGroupVar('');
+        setChiSquareRowVar(firstVar?.name ?? '');
+        setChiSquareColumnVar('');
       }
       setEstimatedN(null);
     } else {
@@ -584,6 +591,68 @@ function StatsInterpreterLabComponent() {
           module: 'STAT-TESTS',
           specification: `${depVar} by ${groupVar} (one-way ANOVA)`,
           results: { ...model, anovaRows },
+          interpretation: apaParagraph
+        });
+        return;
+      }
+
+      if (analysisType === 'Chi-square') {
+        const model = calculateChiSquareIndependence(currentDataset.data, chiSquareRowVar, chiSquareColumnVar);
+        const format = (value: number) => Number.isFinite(value) ? value.toFixed(4) : 'N/A';
+        const pText = model.pValue < 0.001 ? '< 0.001' : model.pValue.toFixed(4);
+        const assumptions: StatsInterpretationResult['assumptions'] = [{
+          testName: 'Expected cell frequencies',
+          statistic: `Minimum expected count = ${format(model.minimumExpectedCount)}`,
+          pValue: 'N/A',
+          verdict: model.minimumExpectedCount < 5 ? 'Warn' : 'Pass'
+        }];
+        const conclusion = model.pValue < 0.05
+          ? 'There is evidence of an association between the selected categorical variables; this test does not establish causation.'
+          : 'The test does not provide sufficient evidence of an association between the selected categorical variables.';
+        const apaParagraph = `A Pearson chi-square test of independence examined the association between ${model.rowVariable} and ${model.columnVariable}, using ${model.sampleSize} complete observations. The association was χ²(${model.df}, N = ${model.sampleSize}) = ${format(model.chiSquare)}, p ${pText}, Cramér’s V = ${format(model.cramersV)}. ${conclusion} The minimum expected cell count was ${format(model.minimumExpectedCount)}; ${model.minimumExpectedCount < 5 ? 'some cells fall below 5, so the asymptotic p-value should be interpreted cautiously.' : 'all expected cell counts were at least 5.'}`;
+        const contingencyTable = {
+          rowVariable: model.rowVariable,
+          columnVariable: model.columnVariable,
+          columnCategories: model.columnCategories,
+          rows: model.rowCategories.map((category, index) => ({ category, observed: model.observed[index] ?? [] }))
+        };
+        const rawText = [
+          'PEARSON CHI-SQUARE TEST OF INDEPENDENCE (calculated locally from the active dataset)',
+          `Row variable: ${model.rowVariable}`,
+          `Column variable: ${model.columnVariable}`,
+          `Valid observations: ${model.sampleSize}; excluded for missing values: ${model.excludedRows}`,
+          `Pearson Chi-square = ${format(model.chiSquare)}, df = ${model.df}, p-value = ${pText}`,
+          `Cramér’s V = ${format(model.cramersV)}`,
+          `Minimum expected count = ${format(model.minimumExpectedCount)}`,
+          'Observed counts (rows by columns):',
+          `${model.rowVariable} | ${model.columnCategories.join(' | ')}`,
+          ...model.rowCategories.map((category, index) => `${category} | ${(model.observed[index] ?? []).join(' | ')}`),
+          '',
+          model.minimumExpectedCount < 5 ? 'Warning: at least one expected cell count is below 5; interpret the asymptotic test cautiously.' : 'Expected-count check: all cells have expected counts of at least 5.'
+        ].join('\n');
+
+        setRawOutput(rawText);
+        setResult({
+          chiSquareResults: {
+            tests: [{ testName: 'Pearson Chi-square', statistic: format(model.chiSquare), df: String(model.df), pValue: pText }],
+            sampleSize: String(model.sampleSize),
+            effectSizeName: 'Cramér’s V',
+            effectSize: format(model.cramersV),
+            minimumExpectedCount: format(model.minimumExpectedCount),
+            contingencyTable
+          },
+          assumptions,
+          apaParagraph
+        });
+        setEstimatedN(model.sampleSize);
+        setShowCitation(false);
+        setIsSimulated(false);
+        addToHistory({
+          id: Math.random().toString(36).substring(7),
+          timestamp: new Date().toISOString(),
+          module: 'STAT-TESTS',
+          specification: `${model.rowVariable} × ${model.columnVariable} (Pearson Chi-square independence test)`,
+          results: model,
           interpretation: apaParagraph
         });
         return;
@@ -1125,6 +1194,23 @@ function StatsInterpreterLabComponent() {
                     </select>
                   </div>
 
+                  {analysisType === 'Chi-square' ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-violet-50 border border-violet-100 rounded-lg">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-violet-700 font-mono block">Row categorical variable</label>
+                        <select value={chiSquareRowVar} onChange={e => setChiSquareRowVar(e.target.value)} className="w-full text-xs border border-violet-200 rounded-lg p-2.5 bg-white font-mono">
+                          {(currentDataset?.variables ?? []).filter(v => v.name !== chiSquareColumnVar).map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-violet-700 font-mono block">Column categorical variable</label>
+                        <select value={chiSquareColumnVar} onChange={e => setChiSquareColumnVar(e.target.value)} className="w-full text-xs border border-violet-200 rounded-lg p-2.5 bg-white font-mono">
+                          {(currentDataset?.variables ?? []).filter(v => v.name !== chiSquareRowVar).map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+                        </select>
+                      </div>
+                      <p className="sm:col-span-2 text-[10px] text-violet-700">Select two categorical columns. This local Pearson test checks whether their categories are associated.</p>
+                    </div>
+                  ) : <>
                   {/* Dependent variable */}
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 font-mono block">
@@ -1141,7 +1227,7 @@ function StatsInterpreterLabComponent() {
                       }}
                       className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white font-medium font-mono text-blue-600"
                     >
-                      {(currentDataset?.variables ?? []).map(v => (
+                  {(currentDataset?.variables ?? []).map(v => (
                         <option key={v.name} value={v.name}>{v.name}</option>
                       ))}
                     </select>
@@ -1191,6 +1277,7 @@ function StatsInterpreterLabComponent() {
                       ))}
                     </div>
                   </div>}
+                  </>}
 
                   {/* Estimator-specific panel helpers */}
                   {(analysisType === 'Panel FE' || analysisType === 'Panel RE') && (
@@ -1423,6 +1510,8 @@ function StatsInterpreterLabComponent() {
                     <Check className="w-3.5 h-3.5" />
                     {analysisType === 'ANOVA'
                       ? 'Calculated locally from selected dataset; assumptions not tested'
+                      : analysisType === 'Chi-square'
+                        ? 'Pearson Chi-square calculated locally from selected dataset'
                       : 'Computed live by the verified statistical engine'}
                   </>
                 ) : (
@@ -1564,6 +1653,25 @@ function StatsInterpreterLabComponent() {
                           <span className="font-mono font-bold text-slate-900">{renderStatValue(result?.chiSquareResults?.minimumExpectedCount)}</span>
                         </div>
                       </div>
+                      {result?.chiSquareResults?.contingencyTable && (
+                        <div>
+                          <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-2">
+                            Observed counts: {result.chiSquareResults.contingencyTable.rowVariable} × {result.chiSquareResults.contingencyTable.columnVariable}
+                          </h5>
+                          <table className="w-full font-mono text-[11px] border-t border-b border-slate-300 text-left">
+                            <thead><tr className="border-b border-slate-200 bg-slate-100">
+                              <th className="py-2 px-3">{result.chiSquareResults.contingencyTable.rowVariable}</th>
+                              {result.chiSquareResults.contingencyTable.columnCategories.map(category => <th key={category} className="py-2 px-3 text-right">{category}</th>)}
+                            </tr></thead>
+                            <tbody>{result.chiSquareResults.contingencyTable.rows.map((row, idx) => (
+                              <tr key={`${row.category}-${idx}`} className="border-b border-slate-100">
+                                <td className="py-2 px-3">{row.category}</td>
+                                {row.observed.map((count, columnIdx) => <td key={columnIdx} className="py-2 px-3 text-right">{count}</td>)}
+                              </tr>
+                            ))}</tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   ) : analysisType === 'Factor Analysis' ? (
                     <div className="space-y-4">
