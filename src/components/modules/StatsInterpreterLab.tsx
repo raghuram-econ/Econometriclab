@@ -1393,6 +1393,11 @@ function StatsInterpreterLabComponent() {
                     // regression coefficients (Chi-square, ANOVA, etc.) have an unrelated df
                     // (e.g. Chi-square's own df), so applying this formula there silently
                     // produces a wrong N instead of an honest "Not reported".
+                    if (analysisType === 'Chi-square') {
+                      return result?.chiSquareResults?.sampleSize && result.chiSquareResults.sampleSize !== 'Not reported'
+                        ? result.chiSquareResults.sampleSize
+                        : 'Not reported';
+                    }
                     if (estimatedN !== null) return estimatedN.toString();
                     return (Number.isFinite(df) && coeffCount > 0) ? (df + coeffCount).toString() : 'Not reported';
                   })()} • {toolType} ENGINE
@@ -1435,6 +1440,8 @@ function StatsInterpreterLabComponent() {
                     ? 'I. ANOVA TABLE (ANALYSIS OF VARIANCE)'
                     : analysisType === 't-test'
                     ? 'I. T-TEST RESULTS'
+                    : analysisType === 'Chi-square'
+                    ? 'I. CHI-SQUARE TEST RESULTS'
                     : analysisType === 'Factor Analysis'
                     ? 'I. FACTOR LOADINGS & VARIANCE EXPLAINED'
                     : 'I. REGRESSION COEFFICIENTS'}
@@ -1514,6 +1521,47 @@ function StatsInterpreterLabComponent() {
                           <span className="font-bold text-slate-800 text-xs">
                             [{renderStatValue(result?.ttestResults?.ci_lower)}, {renderStatValue(result?.ttestResults?.ci_upper)}]
                           </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : analysisType === 'Chi-square' ? (
+                    <div className="space-y-4">
+                      <table className="w-full font-mono text-[11px] border-t-2 border-b-2 border-slate-900 text-left">
+                        <thead>
+                          <tr className="border-b border-slate-300 bg-slate-100">
+                            <th className="py-2.5 px-3 font-bold text-[#1a2744]">Test</th>
+                            <th className="py-2.5 px-3 text-right font-bold text-[#1a2744]">χ² statistic</th>
+                            <th className="py-2.5 px-3 text-right font-bold text-[#1a2744]">df</th>
+                            <th className="py-2.5 px-3 text-right font-bold text-[#1a2744]">p-value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(result?.chiSquareResults?.tests ?? []).length > 0 ? (
+                            result!.chiSquareResults!.tests.map((row, idx) => (
+                              <tr key={`${row.testName}-${idx}`} className="border-b border-slate-200 even:bg-[#f2f4f8] odd:bg-white">
+                                <td className="py-2 px-3 font-bold text-slate-900">{row.testName}</td>
+                                <td className="py-2 px-3 text-right">{renderStatValue(row.statistic)}</td>
+                                <td className="py-2 px-3 text-right">{renderStatValue(row.df)}</td>
+                                <td className="py-2 px-3 text-right font-bold">{renderStatValue(row.pValue)}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr><td colSpan={4} className="py-3 px-3 text-slate-500 italic">No Chi-square statistic was reported in the pasted output.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                          <span className="block text-[9px] uppercase tracking-wider text-slate-500 font-bold">Valid sample N</span>
+                          <span className="font-mono font-bold text-slate-900">{renderStatValue(result?.chiSquareResults?.sampleSize)}</span>
+                        </div>
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                          <span className="block text-[9px] uppercase tracking-wider text-slate-500 font-bold">{result?.chiSquareResults?.effectSizeName && result.chiSquareResults.effectSizeName !== 'Not reported' ? result.chiSquareResults.effectSizeName : 'Effect size'}</span>
+                          <span className="font-mono font-bold text-slate-900">{renderStatValue(result?.chiSquareResults?.effectSize)}</span>
+                        </div>
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                          <span className="block text-[9px] uppercase tracking-wider text-slate-500 font-bold">Minimum expected count</span>
+                          <span className="font-mono font-bold text-slate-900">{renderStatValue(result?.chiSquareResults?.minimumExpectedCount)}</span>
                         </div>
                       </div>
                     </div>
@@ -1599,7 +1647,7 @@ function StatsInterpreterLabComponent() {
                     </table>
                   )}
                 </div>
-                {!(analysisType === 'ANOVA' || analysisType === 't-test' || analysisType === 'Factor Analysis') && (
+                {!(analysisType === 'ANOVA' || analysisType === 't-test' || analysisType === 'Factor Analysis' || analysisType === 'Chi-square') && (
                   <p className="font-mono text-[9px] text-slate-500 italic">
                     Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
                   </p>
@@ -1607,7 +1655,7 @@ function StatsInterpreterLabComponent() {
               </div>
 
               {/* SECTION II: DIAGNOSTICS */}
-              {result?.diagnostics && (result.diagnostics.df || result.diagnostics.rSquared) && (
+              {analysisType !== 'Chi-square' && result?.diagnostics && (result.diagnostics.df || result.diagnostics.rSquared) && (
                 <div className="space-y-2">
                   <h4 className="text-xs font-bold text-[#1a2744] uppercase tracking-wider font-mono">II. MODEL SUMMARY & GOODNESS OF FIT</h4>
                   <div className="font-mono text-[11px] text-slate-800 bg-[#f2f4f8] border border-slate-200 rounded p-4 whitespace-pre-wrap leading-relaxed">
@@ -1753,7 +1801,7 @@ function StatsInterpreterLabComponent() {
               </div>
 
               {/* NEW SECTION V: PUBLICATION-READY OUTPUT TABLE (AER/AEJ STYLE) */}
-              {analysisType !== 'ANOVA' && <div className="space-y-3 pt-6 border-t border-slate-300">
+              {analysisType !== 'ANOVA' && analysisType !== 'Chi-square' && <div className="space-y-3 pt-6 border-t border-slate-300">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <h4 className="text-xs font-bold text-[#1a2744] uppercase tracking-wider font-mono">V. PUBLICATION TABLE (AER/AEJ STYLE)</h4>
@@ -1829,7 +1877,7 @@ function StatsInterpreterLabComponent() {
               </div>}
 
               {/* NEW SECTION VI: REPLICABILITY / EXPORT CENTER */}
-              {analysisType !== 'ANOVA' && <div className="space-y-3 pt-6 border-t border-slate-300">
+              {analysisType !== 'ANOVA' && analysisType !== 'Chi-square' && <div className="space-y-3 pt-6 border-t border-slate-300">
                 <h4 className="text-xs font-bold text-[#1a2744] uppercase tracking-wider font-mono">VI. EXPORT CENTER (CODE REPLICATION)</h4>
                 <p className="text-[10px] text-slate-400">Generate fully reproducible, authentic scripts to recreate this analysis in external environments:</p>
                 <div className="grid grid-cols-3 gap-3">
@@ -1847,7 +1895,7 @@ function StatsInterpreterLabComponent() {
               </div>}
 
               {/* NEW SECTION VII: ACADEMIC COGNITIVE INSIGHTS PANEL */}
-              {analysisType !== 'ANOVA' && <div className="space-y-4 pt-6 border-t border-slate-300">
+              {analysisType !== 'ANOVA' && analysisType !== 'Chi-square' && <div className="space-y-4 pt-6 border-t border-slate-300">
                 <div className="flex items-center gap-2">
                   <BookOpen className="w-4 h-4 text-[#1a2744]" />
                   <h4 className="text-xs font-bold text-[#1a2744] uppercase tracking-wider font-mono">VII. COGNITIVE INSIGHTS DECK</h4>
@@ -1953,7 +2001,7 @@ function StatsInterpreterLabComponent() {
               </div>}
 
               {/* NEW SECTION VIII: SIDE-BY-SIDE HISTORICAL RUNS COMPARISON */}
-              {analysisType !== 'ANOVA' && <div className="space-y-4 pt-6 border-t border-slate-300">
+              {analysisType !== 'ANOVA' && analysisType !== 'Chi-square' && <div className="space-y-4 pt-6 border-t border-slate-300">
                 <div className="flex items-center gap-2 justify-between">
                   <div className="flex items-center gap-2">
                     <Table className="w-4 h-4 text-[#1a2744]" />

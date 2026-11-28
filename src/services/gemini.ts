@@ -754,6 +754,21 @@ export interface FactorAnalysisResults {
   }[];
 }
 
+export interface ChiSquareTestRow {
+  testName: string;
+  statistic: string;
+  df: string;
+  pValue: string;
+}
+
+export interface ChiSquareResults {
+  tests: ChiSquareTestRow[];
+  sampleSize: string;
+  effectSizeName: string;
+  effectSize: string;
+  minimumExpectedCount: string;
+}
+
 export interface StatsInterpretationResult {
   coefficients?: CoefficientResult[];
   diagnostics?: DiagnosticsResult;
@@ -763,6 +778,7 @@ export interface StatsInterpretationResult {
   anovaGroups?: AnovaGroupSummary[];
   ttestResults?: TTestResults;
   factorAnalysis?: FactorAnalysisResults;
+  chiSquareResults?: ChiSquareResults;
   warnings?: string[];
 }
 

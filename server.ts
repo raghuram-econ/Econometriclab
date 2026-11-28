@@ -2324,6 +2324,68 @@ Keep the "coefficients" field empty or omit it. The "ttestResults" field is mand
           },
           required: ["ttestResults", "diagnostics", "assumptions", "apaParagraph"]
         };
+      } else if (analysisType === "Chi-square") {
+        promptInstructionCustom = `The analysis type is a Chi-square test. Do not return regression coefficients. Parse every Chi-square test result explicitly reported in the raw output (for example, Pearson Chi-Square and Likelihood Ratio) into the "tests" array. For each row, preserve the reported test name, statistic, degrees of freedom, and p-value. If no Chi-square result is present, return an empty tests array; do not invent values.
+Return "sampleSize" only when the output reports the valid/sample N, "effectSizeName" and "effectSize" only when it explicitly reports Phi or Cramer's V, and "minimumExpectedCount" only when an expected-cell count is explicitly reported. For unavailable fields return "Not reported". Do not infer a sample size or effect size.
+The "chiSquareResults" field is mandatory. Keep "coefficients" empty or omit it.`;
+
+        responseSchema = {
+          type: Type.OBJECT,
+          properties: {
+            chiSquareResults: {
+              type: Type.OBJECT,
+              properties: {
+                tests: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      testName: { type: Type.STRING },
+                      statistic: { type: Type.STRING },
+                      df: { type: Type.STRING },
+                      pValue: { type: Type.STRING }
+                    },
+                    required: ["testName", "statistic", "df", "pValue"]
+                  }
+                },
+                sampleSize: { type: Type.STRING },
+                effectSizeName: { type: Type.STRING },
+                effectSize: { type: Type.STRING },
+                minimumExpectedCount: { type: Type.STRING }
+              },
+              required: ["tests", "sampleSize", "effectSizeName", "effectSize", "minimumExpectedCount"]
+            },
+            diagnostics: {
+              type: Type.OBJECT,
+              properties: {
+                residualStdError: { type: Type.STRING },
+                df: { type: Type.STRING },
+                rSquared: { type: Type.STRING },
+                adjRSquared: { type: Type.STRING },
+                fStatistic: { type: Type.STRING },
+                fDf1: { type: Type.STRING },
+                fDf2: { type: Type.STRING },
+                fPValue: { type: Type.STRING }
+              },
+              required: []
+            },
+            assumptions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  testName: { type: Type.STRING },
+                  statistic: { type: Type.STRING },
+                  pValue: { type: Type.STRING },
+                  verdict: { type: Type.STRING }
+                },
+                required: ["testName", "statistic", "pValue", "verdict"]
+              }
+            },
+            apaParagraph: { type: Type.STRING }
+          },
+          required: ["chiSquareResults", "diagnostics", "assumptions", "apaParagraph"]
+        };
       } else if (analysisType === "Factor Analysis") {
         promptInstructionCustom = `The analysis type is Factor Analysis. Instead of standard regression coefficients, you must return loadings and variance details in the "factorAnalysis" field.
 The "factorAnalysis" object must contain:
@@ -2405,7 +2467,7 @@ Keep the "coefficients" field empty or omit it. The "factorAnalysis" field is ma
           required: ["factorAnalysis", "diagnostics", "assumptions", "apaParagraph"]
         };
       } else {
-        // Standard regression models (OLS, Robust OLS, WLS, Logit, Probit, Panel FE, Panel RE, IV, DiD, Poisson, Tobit, Quantile, ARIMA, Cox PH, Chi-square etc.)
+        // Standard regression models (OLS, Robust OLS, WLS, Logit, Probit, Panel FE, Panel RE, IV, DiD, Poisson, Tobit, Quantile, ARIMA, Cox PH, etc.)
         promptInstructionCustom = `The analysis type is ${analysisType}. You must return standard regression coefficients.
 You must parse the raw output and return:
 1. "coefficients": An array of objects, each containing:
